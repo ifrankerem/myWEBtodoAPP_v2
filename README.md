@@ -238,12 +238,6 @@ Settings → Export to Calendar → Downloads `.ics` file with all alarms
 
 ---
 
-## 🐣 Easter Egg
-
-Create a task with a due date of **December 20th** for a special surprise! 🎉
-
----
-
 ## 📝 Scripts
 
 | Command | Description |
@@ -270,12 +264,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
-
----
-
-## 👤 Author
-
-Built with ❤️ as a personal productivity tool.
 
 ---
 
