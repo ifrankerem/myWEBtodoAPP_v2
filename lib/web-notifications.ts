@@ -168,9 +168,14 @@ export function stopAllForegroundReminders(): void {
 }
 
 // Play alarm sound
-function playAlarmSound(): void {
+async function playAlarmSound(): Promise<void> {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // Resume the audio context (required by autoplay policy)
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
     
     // Play a two-tone alarm sound
     const playTone = (frequency: number, startTime: number, duration: number) => {
@@ -183,18 +188,20 @@ function playAlarmSound(): void {
       oscillator.frequency.value = frequency;
       oscillator.type = 'sine';
       
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime + startTime);
+      gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + startTime);
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + startTime + duration);
       
       oscillator.start(audioContext.currentTime + startTime);
       oscillator.stop(audioContext.currentTime + startTime + duration);
     };
     
-    // Play 3 sets of tones
-    for (let i = 0; i < 3; i++) {
+    // Play 5 sets of tones for louder effect
+    for (let i = 0; i < 5; i++) {
       playTone(800, i * 0.4, 0.15);
       playTone(1000, i * 0.4 + 0.15, 0.15);
     }
+    
+    console.log('Alarm sound played successfully');
   } catch (error) {
     console.error('Error playing alarm sound:', error);
   }
