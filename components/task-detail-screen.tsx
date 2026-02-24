@@ -146,23 +146,26 @@ export default function TaskDetailScreen({
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#0B0B0B] relative">
+    <div className="h-screen flex flex-col bg-transparent relative">
       {/* Header */}
-      <div className="flex items-center justify-between p-6 pb-4">
-        <button onClick={onOpenDrawer} className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors">
-          <Menu className="w-6 h-6 text-[#888]" />
+      <div className="flex items-center justify-between p-6 pb-4 animate-fade-in">
+        <button onClick={onOpenDrawer} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
+          <Menu className="w-6 h-6 text-[var(--metal-muted)]" />
         </button>
-        <h1 className="text-sm font-medium tracking-[0.2em] text-[#888]">
+        <h1 
+          className="text-sm font-bold tracking-[0.2em] text-[var(--metal-muted)]"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
           {isEditing ? "EDIT TASK" : "TASK DETAILS"}
         </h1>
-        <button onClick={onBack} className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors">
-          <ArrowLeft className="w-6 h-6 text-[#888]" />
+        <button onClick={onBack} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
+          <ArrowLeft className="w-6 h-6 text-[var(--metal-muted)]" />
         </button>
       </div>
 
       {/* Task Detail Container */}
       <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-md mx-auto border border-[#2a2a2a] rounded-2xl overflow-hidden bg-[#0f0f0f]">
+        <div className="max-w-md mx-auto border border-[var(--obsidian-border)] rounded-2xl overflow-hidden bg-[var(--obsidian-1)] animate-scale-in stagger-1">
           {/* Photo if exists */}
           {task.photo && (
             <div className="w-full aspect-[4/3] overflow-hidden">
@@ -176,7 +179,7 @@ export default function TaskDetailScreen({
               <>
                 {/* Photo */}
                 <div>
-                  <label className="block text-xs text-[#888] mb-2 tracking-wider">PHOTO</label>
+                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>PHOTO</label>
                   {editPhoto ? (
                     <div className="relative">
                       <img 
@@ -191,14 +194,14 @@ export default function TaskDetailScreen({
                         </label>
                         <button
                           onClick={handleRemovePhoto}
-                          className="p-2 bg-[#ff3b30]/80 rounded-full hover:bg-[#ff3b30]"
+                          className="p-2 bg-[var(--forge-red)]/80 rounded-full hover:bg-[var(--forge-red)]"
                         >
                           <X className="w-4 h-4 text-white" />
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <label className="flex items-center justify-center gap-2 px-4 py-6 bg-[#1a1a1a] border border-[#333] border-dashed rounded-lg text-[#888] hover:border-[#555] transition-colors cursor-pointer">
+                    <label className="flex items-center justify-center gap-2 px-4 py-6 bg-[var(--obsidian)] border border-[var(--obsidian-border)] border-dashed rounded-lg text-[var(--metal-muted)] hover:border-[var(--ember)] transition-all duration-300 cursor-pointer">
                       <ImageIcon className="w-5 h-5" />
                       <span>Add Photo</span>
                       <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
@@ -208,45 +211,47 @@ export default function TaskDetailScreen({
 
                 {/* Title */}
                 <div>
-                  <label className="block text-xs text-[#888] mb-2 tracking-wider">TITLE</label>
+                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>TITLE</label>
                   <input
                     type="text"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg text-white placeholder:text-[#666] focus:border-[#555] focus:outline-none"
+                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300"
                   />
                 </div>
 
                 {/* Detail */}
                 <div>
-                  <label className="block text-xs text-[#888] mb-2 tracking-wider">DETAILS</label>
+                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>DETAILS</label>
                   <textarea
                     value={editDetail}
                     onChange={(e) => setEditDetail(e.target.value)}
                     rows={3}
-                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg text-white placeholder:text-[#666] focus:border-[#555] focus:outline-none resize-none"
+                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 resize-none"
                   />
                 </div>
 
                 {/* Due Date */}
                 <div>
-                  <label className="block text-xs text-[#888] mb-2 tracking-wider">DUE DATE</label>
+                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>DUE DATE</label>
                   <input
                     type="date"
                     value={editDueDate}
                     onChange={(e) => setEditDueDate(e.target.value)}
-                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg text-white focus:border-[#555] focus:outline-none [color-scheme:dark]"
+                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]"
                   />
                 </div>
 
                 {/* Alarm */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs text-[#888] tracking-wider">ALARM</label>
+                    <label className="text-xs text-[var(--metal-muted)] tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>ALARM</label>
                     <button
                       onClick={() => setEditAlarmEnabled(!editAlarmEnabled)}
-                      className={`px-4 py-1 rounded-full text-xs border transition-all ${
-                        editAlarmEnabled ? "bg-white text-black border-white" : "bg-[#1a1a1a] text-[#888] border-[#333]"
+                      className={`px-4 py-1 rounded-full text-xs border transition-all duration-300 ${
+                        editAlarmEnabled 
+                          ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.3)]" 
+                          : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"
                       }`}
                     >
                       {editAlarmEnabled ? "ON" : "OFF"}
@@ -257,7 +262,7 @@ export default function TaskDetailScreen({
                       type="time"
                       value={editAlarm}
                       onChange={(e) => setEditAlarm(e.target.value)}
-                      className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg text-white focus:border-[#555] focus:outline-none [color-scheme:dark]"
+                      className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]"
                     />
                   )}
                 </div>
@@ -265,11 +270,13 @@ export default function TaskDetailScreen({
                 {/* Repeat Days */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs text-[#888] tracking-wider">REPEAT</label>
+                    <label className="text-xs text-[var(--metal-muted)] tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>REPEAT</label>
                     <button
                       onClick={() => setEditIsRepetitive(!editIsRepetitive)}
-                      className={`px-4 py-1 rounded-full text-xs border transition-all ${
-                        editIsRepetitive ? "bg-white text-black border-white" : "bg-[#1a1a1a] text-[#888] border-[#333]"
+                      className={`px-4 py-1 rounded-full text-xs border transition-all duration-300 ${
+                        editIsRepetitive 
+                          ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.3)]" 
+                          : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"
                       }`}
                     >
                       {editIsRepetitive ? "ON" : "OFF"}
@@ -281,10 +288,10 @@ export default function TaskDetailScreen({
                         <button
                           key={day}
                           onClick={() => toggleDay(day)}
-                          className={`px-3 py-2 rounded-lg border text-xs transition-all ${
+                          className={`px-3 py-2 rounded-lg border text-xs transition-all duration-300 ${
                             editRepeats.includes(day)
-                              ? "bg-white text-black border-white"
-                              : "bg-[#1a1a1a] text-[#888] border-[#333] hover:border-[#555]"
+                              ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.2)]"
+                              : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)] hover:border-[var(--ember)]"
                           }`}
                         >
                           {day}
@@ -299,28 +306,38 @@ export default function TaskDetailScreen({
               <>
                 {/* Title */}
                 <div>
-                  <h2 className="text-xl font-medium text-white">{task.title || task.name}</h2>
+                  <h2 
+                    className="text-xl text-[var(--metal-bright)]"
+                    style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
+                  >
+                    {task.title || task.name}
+                  </h2>
                 </div>
 
                 {/* Detail Section */}
                 {task.detail && (
                   <div>
-                    <h3 className="text-xs text-[#888] mb-3 tracking-wider">DETAIL</h3>
-                    <p className="text-sm text-[#ddd] leading-relaxed">{task.detail}</p>
+                    <h3 
+                      className="text-xs text-[var(--metal-muted)] mb-3 tracking-wider"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      DETAIL
+                    </h3>
+                    <p className="text-sm text-[var(--metal-bright)] leading-relaxed font-light">{task.detail}</p>
                   </div>
                 )}
 
-                <div className="border-t border-[#2a2a2a] pt-6">
+                <div className="border-t border-[var(--obsidian-border)] pt-6">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-[#888]">Status:</span>
+                    <span className="text-sm text-[var(--metal-muted)] font-light">Status:</span>
                     <button
                       onClick={handleToggleComplete}
                       className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-300 ${
                         isAnimating ? "scale-95" : "scale-100"
                       } ${
                         localCompleted
-                          ? "bg-[#34c759]/20 text-[#34c759] border border-[#34c759]/30 hover:bg-[#34c759]/30 active:scale-90"
-                          : "bg-[#1f1f1f] text-[#888] border border-[#333] hover:bg-[#2a2a2a] hover:border-[#444] active:scale-90"
+                          ? "bg-[var(--forge-green)]/15 text-[var(--forge-green)] border border-[var(--forge-green)]/30 hover:bg-[var(--forge-green)]/25 active:scale-90 shadow-[0_0_10px_rgba(var(--forge-green-rgb),0.15)]"
+                          : "bg-[var(--obsidian-2)] text-[var(--metal-muted)] border border-[var(--obsidian-border)] hover:bg-[var(--obsidian-border)] active:scale-90"
                       }`}
                     >
                       <CheckCircle
@@ -336,19 +353,19 @@ export default function TaskDetailScreen({
                 </div>
 
                 {/* Metadata */}
-                <div className="border-t border-[#2a2a2a] pt-6 space-y-4">
+                <div className="border-t border-[var(--obsidian-border)] pt-6 space-y-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-[#888]">Created Date:</span>
-                    <span className="text-sm text-white">{formatDate(task.createdDate)}</span>
+                    <span className="text-sm text-[var(--metal-muted)] font-light">Created Date:</span>
+                    <span className="text-sm text-[var(--metal-bright)]">{formatDate(task.createdDate)}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-[#888]">Last Edited Date:</span>
-                    <span className="text-sm text-white">{formatDate(task.lastEditedDate)}</span>
+                    <span className="text-sm text-[var(--metal-muted)] font-light">Last Edited Date:</span>
+                    <span className="text-sm text-[var(--metal-bright)]">{formatDate(task.lastEditedDate)}</span>
                   </div>
                   {task.dueDate && (
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-[#888]">Due Date:</span>
-                      <span className="text-sm text-white">
+                      <span className="text-sm text-[var(--metal-muted)] font-light">Due Date:</span>
+                      <span className="text-sm text-[var(--metal-bright)]">
                         {new Date(task.dueDate).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -359,14 +376,14 @@ export default function TaskDetailScreen({
                   )}
                   {task.alarm && (
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-[#888]">Alarm:</span>
-                      <span className="text-sm text-white">{task.alarm}</span>
+                      <span className="text-sm text-[var(--metal-muted)] font-light">Alarm:</span>
+                      <span className="text-sm text-[var(--forge-orange)]">{task.alarm}</span>
                     </div>
                   )}
                   {task.repeats && (
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-[#888]">Repeats:</span>
-                      <span className="text-sm text-white">{task.repeats}</span>
+                      <span className="text-sm text-[var(--metal-muted)] font-light">Repeats:</span>
+                      <span className="text-sm text-[var(--ember)]">{task.repeats}</span>
                     </div>
                   )}
                 </div>
@@ -383,7 +400,7 @@ export default function TaskDetailScreen({
             {/* Cancel Edit Button */}
             <button
               onClick={handleCancelEdit}
-              className="w-14 h-14 rounded-full bg-[#2a2a2a] text-[#888] flex items-center justify-center shadow-lg hover:bg-[#333] active:scale-95 transition-all"
+              className="w-14 h-14 rounded-full bg-[var(--obsidian-2)] text-[var(--metal-muted)] flex items-center justify-center shadow-lg hover:bg-[var(--obsidian-border)] active:scale-95 transition-all"
             >
               <X className="w-6 h-6" />
             </button>
@@ -391,7 +408,7 @@ export default function TaskDetailScreen({
             {/* Save Button - Primary */}
             <button
               onClick={handleSaveEdit}
-              className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-lg hover:bg-gray-100 active:scale-95 transition-all shadow-[0_4px_20px_rgba(255,255,255,0.3)]"
+              className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)]"
             >
               <Check className="w-7 h-7" strokeWidth={2.5} />
             </button>
@@ -406,7 +423,7 @@ export default function TaskDetailScreen({
                   onBack();
                 }
               }}
-              className="w-14 h-14 rounded-full bg-[#ff3b30] text-white flex items-center justify-center shadow-lg hover:bg-[#ff453a] active:scale-95 transition-all shadow-[0_4px_20px_rgba(255,59,48,0.4)]"
+              className="w-14 h-14 rounded-full bg-[var(--forge-red)] text-white flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_20px_rgba(var(--forge-red-rgb),0.4)] animate-fade-in-up stagger-1"
             >
               <Trash2 className="w-5 h-5" />
             </button>
@@ -414,7 +431,7 @@ export default function TaskDetailScreen({
             {/* Edit Button - Primary */}
             <button
               onClick={() => setIsEditing(true)}
-              className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-lg hover:bg-gray-100 active:scale-95 transition-all shadow-[0_4px_20px_rgba(255,255,255,0.3)]"
+              className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)] animate-fade-in-up stagger-2"
             >
               <Pencil className="w-6 h-6" />
             </button>

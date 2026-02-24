@@ -1,18 +1,28 @@
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { DM_Sans, Outfit } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-body-family",
+  weight: ["200", "300", "400", "500"],
+});
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  variable: "--font-display-family",
+  weight: ["300", "500", "700"],
+});
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#0B0B0B',
+  themeColor: '#0b0d10',
 }
+
 
 export const metadata: Metadata = {
   title: 'Task Manager',
@@ -73,7 +83,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`font-sans antialiased`}>
+      <body className={`${dmSans.variable} ${outfit.variable} font-sans antialiased`}>
         {children}
         <Analytics />
       </body>

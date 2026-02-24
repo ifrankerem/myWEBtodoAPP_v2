@@ -66,7 +66,9 @@ export async function migrateFromLocalStorage(): Promise<void> {
 export async function getTasks(): Promise<TaskRecord[]> {
   try {
     await migrateFromLocalStorage();
-    return await db.tasks.toArray();
+    const tasks = await db.tasks.toArray();
+    // Sort by creation time, newest first
+    return tasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.error('Error getting tasks:', error);
     return [];

@@ -16,14 +16,14 @@
   --secondary-foreground: oklch(0.98 0 0);
   --muted: oklch(0.16 0 0);
   --muted-foreground: oklch(0.55 0 0);
-  --accent: oklch(0.75 0.15 166);
+  --accent: oklch(0.75 0.12 60);
   --accent-foreground: oklch(0.05 0 0);
   --destructive: oklch(0.55 0.24 27);
   --destructive-foreground: oklch(0.98 0 0);
   --border: oklch(0.16 0 0);
   --input: oklch(0.16 0 0);
   --ring: oklch(0.45 0 0);
-  --chart-1: oklch(0.75 0.15 166);
+  --chart-1: oklch(0.75 0.12 60);
   --chart-2: oklch(0.65 0.12 210);
   --chart-3: oklch(0.55 0.18 85);
   --chart-4: oklch(0.7 0.2 300);
@@ -37,11 +37,44 @@
   --sidebar-accent-foreground: oklch(0.98 0 0);
   --sidebar-border: oklch(0.16 0 0);
   --sidebar-ring: oklch(0.45 0 0);
+
+  /* === Obsidian Forge Design Tokens === */
+
+  /* Primary Accent — Warm Ember */
+  --ember: #e8913a;
+  --ember-rgb: 232, 145, 58;
+  --ember-glow: #f5a623;
+
+  /* Semantic Colors */
+  --forge-green: #7ec87e;
+  --forge-green-rgb: 126, 200, 126;
+  --forge-red: #e05252;
+  --forge-red-rgb: 224, 82, 82;
+  --forge-orange: #d4915c;
+  --forge-orange-rgb: 212, 145, 92;
+
+  /* Surface Colors — Obsidian Gradient */
+  --obsidian: #0b0d10;
+  --obsidian-1: #12151a;
+  --obsidian-2: #1a1e26;
+  --obsidian-border: #262b35;
+
+  /* Text — Metal Tones */
+  --metal-bright: #e8ecf0;
+  --metal-muted: #6b7280;
+  --metal-dim: #3b4150;
+
+  /* Motion */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 0.3s;
+  --duration-base: 0.6s;
+  --duration-slow: 0.9s;
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans: var(--font-body-family, 'DM Sans'), "Geist", "Geist Fallback", sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --font-display: var(--font-display-family, 'Outfit'), sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -89,6 +122,100 @@
   }
 }
 
+/* === Atmospheric Background — Ember Forge === */
+body {
+  background: var(--obsidian);
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 15% 20%, rgba(var(--ember-rgb), 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 80%, rgba(var(--forge-green-rgb), 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(var(--ember-rgb), 0.02) 0%, transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* === Entrance Animations === */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(var(--ember-rgb), 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(var(--ember-rgb), 0.5);
+  }
+}
+
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fadeInUp 0.7s var(--ease-out-expo) forwards;
+}
+
+.animate-scale-in {
+  opacity: 0;
+  animation: scaleIn 0.6s var(--ease-out-expo) forwards;
+}
+
+.animate-fade-in {
+  opacity: 0;
+  animation: fadeIn 0.5s var(--ease-out-expo) forwards;
+}
+
+/* Stagger delays */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+.stagger-7 { animation-delay: 0.35s; }
+.stagger-8 { animation-delay: 0.4s; }
+.stagger-9 { animation-delay: 0.45s; }
+.stagger-10 { animation-delay: 0.5s; }
+
+/* === Existing Animations === */
 @keyframes wiggle {
   0%,
   100% {
@@ -106,3 +233,17 @@
   animation: wiggle 0.3s ease-in-out infinite;
 }
 
+/* === Ember Glow Utility === */
+.glow-ember {
+  box-shadow: 0 0 15px rgba(var(--ember-rgb), 0.15);
+}
+
+/* === Accessibility === */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-scale-in,
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+  }
+}

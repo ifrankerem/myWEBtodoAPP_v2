@@ -155,7 +155,7 @@ export default function Page() {
     setDrawerOpen(false)
   }
 
-  const handleAddTask = async (newTask: Task, photoFile?: File) => {
+  const handleAddTask = async (newTask: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => {
     let photoBase64: string | undefined
     
     if (photoFile) {
@@ -305,14 +305,17 @@ export default function Page() {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B0B0B] text-white flex items-center justify-center">
-        <div className="text-[#888] animate-pulse">Loading...</div>
+      <div className="min-h-screen bg-[var(--obsidian)] text-[var(--metal-bright)] flex items-center justify-center relative z-10">
+        <div className="flex flex-col items-center gap-4 animate-fade-in">
+          <div className="w-3 h-3 rounded-full bg-[var(--ember)]" style={{ animation: 'pulseGlow 2s ease-in-out infinite' }} />
+          <div className="text-[var(--metal-muted)] text-sm font-light tracking-widest" style={{ fontFamily: 'var(--font-display)' }}>LOADING</div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="relative min-h-screen bg-[#0B0B0B] text-white overflow-hidden">
+    <div className="relative min-h-screen bg-transparent text-[var(--metal-bright)] overflow-hidden" style={{ position: 'relative', zIndex: 1 }}>
       {/* Drawer Overlay */}
       {drawerOpen && (
         <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
@@ -365,7 +368,7 @@ export default function Page() {
             isCompletedView={true}
           />
         )}
-        {currentScreen === "calendar" && <CalendarScreen tasks={tasks} onOpenDrawer={() => setDrawerOpen(true)} />}
+        {currentScreen === "calendar" && <CalendarScreen tasks={tasks} onOpenDrawer={() => setDrawerOpen(true)} onSelectTask={handleTaskClick} />}
         {currentScreen === "detail" && selectedTask && (
           <TaskDetailScreen
             task={selectedTask}
@@ -399,7 +402,7 @@ export default function Page() {
           <div className="relative">
             <button
               onClick={() => setShowEasterEgg(false)}
-              className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-[#ff3b30] text-white flex items-center justify-center shadow-lg hover:bg-[#ff453a] active:scale-95 transition-all z-10"
+              className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-[var(--forge-red)] text-white flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all z-10"
             >
               ✕
             </button>
