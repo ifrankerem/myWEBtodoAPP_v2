@@ -1,4 +1,4 @@
-const CACHE_NAME = 'task-manager-v2';
+const CACHE_NAME = 'task-manager-v3';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -8,7 +8,7 @@ const STATIC_ASSETS = [
 ];
 
 // Dynamic cache for Next.js chunks and other assets
-const DYNAMIC_CACHE = 'task-manager-dynamic-v2';
+const DYNAMIC_CACHE = 'task-manager-dynamic-v3';
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
