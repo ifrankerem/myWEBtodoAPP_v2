@@ -34,7 +34,7 @@ export default function TaskDetailScreen({
   const [editAlarmEnabled, setEditAlarmEnabled] = useState(!!task.alarm)
   const [editRepeats, setEditRepeats] = useState(task.repeats?.split(", ") || [])
   const [editIsRepetitive, setEditIsRepetitive] = useState(!!task.repeats)
-  const [editPhoto, setEditPhoto] = useState<string | undefined>(task.photo)
+  const [editPhoto, setEditPhoto] = useState<string | undefined>(task.photo || undefined)
   const [photoRemoved, setPhotoRemoved] = useState(false)
 
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -124,7 +124,7 @@ export default function TaskDetailScreen({
         dueDate: editDueDate || undefined,
         alarm: editAlarmEnabled && editAlarm ? editAlarm : undefined,
         repeats: editIsRepetitive && editRepeats.length > 0 ? editRepeats.join(", ") : undefined,
-        photo: photoRemoved ? undefined : editPhoto,
+        photo: photoRemoved ? null : editPhoto,
         type: editPhoto ? "picture" : "text",
       })
     }
@@ -140,7 +140,7 @@ export default function TaskDetailScreen({
     setEditAlarmEnabled(!!task.alarm)
     setEditRepeats(task.repeats?.split(", ") || [])
     setEditIsRepetitive(!!task.repeats)
-    setEditPhoto(task.photo)
+    setEditPhoto(task.photo || undefined)
     setPhotoRemoved(false)
     setIsEditing(false)
   }

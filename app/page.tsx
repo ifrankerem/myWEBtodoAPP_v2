@@ -36,7 +36,7 @@ export type Task = {
   name: string
   title: string
   type: "picture" | "text" | "mixed"
-  photo?: string
+  photo?: string | null
   detail?: string
   createdDate: Date
   lastEditedDate: Date
@@ -250,7 +250,7 @@ export default function Page() {
     const storageUpdates: Partial<StoredTask> = {}
     if (updates.title) storageUpdates.title = updates.title
     if (updates.detail !== undefined) storageUpdates.detail = updates.detail
-    if (updates.photo !== undefined) storageUpdates.photo = updates.photo
+    if ('photo' in updates) storageUpdates.photo = updates.photo || undefined
     if (updates.dueDate !== undefined) storageUpdates.dueDate = updates.dueDate
     if (updates.alarm !== undefined) storageUpdates.alarm = updates.alarm
     if (updates.repeats !== undefined) storageUpdates.repeats = updates.repeats
@@ -348,7 +348,7 @@ export default function Page() {
                 id: t.id,
                 title: t.title,
                 detail: t.detail,
-                photo: t.photo,
+                photo: t.photo || undefined,
                 completed: t.completed || false,
                 createdAt: t.createdDate.toISOString(),
                 updatedAt: t.lastEditedDate.toISOString(),
