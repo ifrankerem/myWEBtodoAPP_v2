@@ -250,6 +250,7 @@ export default function Page() {
     const storageUpdates: Partial<StoredTask> = {}
     if (updates.title) storageUpdates.title = updates.title
     if (updates.detail !== undefined) storageUpdates.detail = updates.detail
+    if (updates.photo !== undefined) storageUpdates.photo = updates.photo
     if (updates.dueDate !== undefined) storageUpdates.dueDate = updates.dueDate
     if (updates.alarm !== undefined) storageUpdates.alarm = updates.alarm
     if (updates.repeats !== undefined) storageUpdates.repeats = updates.repeats
