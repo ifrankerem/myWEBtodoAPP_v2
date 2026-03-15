@@ -2,10 +2,10 @@
 const nextConfig = {
   // Static export for Capacitor native apps
   output: 'export',
-  
+
   // Required for static export
   trailingSlash: true,
-  
+
   typescript: {
     ignoreBuildErrors: true,
   },
