@@ -79,21 +79,27 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
         let imported = 0
         for (const task of tasksArray) {
           if (task.title) {
-            await createCloudTask(user.uid, {
-              title: task.title,
-              detail: task.detail || task.description,
-              photo: task.photo,
-              alarm: task.alarm,
-              repeats: task.repeats,
-              dueDate: task.dueDate,
-            })
-            imported++
+            // Build task data, only including fields that actually exist
+            const taskData: Record<string, any> = { title: task.title }
+            if (task.detail || task.description) taskData.detail = task.detail || task.description
+            if (task.photo) taskData.photo = task.photo
+            if (task.alarm) taskData.alarm = task.alarm
+            if (task.repeats) taskData.repeats = task.repeats
+            if (task.dueDate) taskData.dueDate = task.dueDate
+
+            try {
+              await createCloudTask(user.uid, taskData as any)
+              imported++
+            } catch (taskError) {
+              console.error('Error importing task:', task.title, taskError)
+            }
           }
         }
         
         setImportResult({ success: true, message: `Successfully imported ${imported} tasks.` })
         onDataImported()
       } catch (error) {
+        console.error('Import error:', error)
         setImportResult({ success: false, message: 'Failed to read or parse file.' })
       }
       
