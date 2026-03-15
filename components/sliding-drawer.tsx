@@ -1,7 +1,8 @@
 "use client"
 
 import type { Screen } from "@/app/page"
-import { Calendar, ListTodo, CheckCircle2, Settings } from "lucide-react"
+import { Calendar, ListTodo, CheckCircle2, Settings, Cloud } from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
 
 interface SlidingDrawerProps {
   isOpen: boolean
@@ -10,6 +11,8 @@ interface SlidingDrawerProps {
 }
 
 export default function SlidingDrawer({ isOpen, currentScreen, onNavigate }: SlidingDrawerProps) {
+  const { user } = useAuth()
+
   return (
     <div
       className={`fixed top-0 left-0 h-full w-[75%] max-w-[280px] bg-[var(--obsidian-1)] border-r border-[var(--obsidian-border)] z-50 flex flex-col ${
@@ -17,7 +20,7 @@ export default function SlidingDrawer({ isOpen, currentScreen, onNavigate }: Sli
       }`}
       style={{ transition: 'transform 0.35s var(--ease-out-expo)' }}
     >
-      {/* App Title */}
+      {/* App Title + User */}
       <div className="p-6 pt-12 border-b border-[var(--obsidian-border)]">
         <div>
           <p 
@@ -26,8 +29,24 @@ export default function SlidingDrawer({ isOpen, currentScreen, onNavigate }: Sli
           >
             Task Manager
           </p>
-          <p className="text-xs text-[var(--metal-muted)] mt-1 font-light">by ifrankerem · v1.2.0</p>
+          <p className="text-xs text-[var(--metal-muted)] mt-1 font-light">by ifrankerem · v2.0.0</p>
         </div>
+        {user && (
+          <div className="flex items-center gap-2.5 mt-4 pt-4 border-t border-[var(--obsidian-border)]">
+            <div className="w-8 h-8 rounded-full bg-[var(--ember)]/20 flex items-center justify-center flex-shrink-0">
+              <span className="text-[var(--ember)] font-bold text-xs" style={{ fontFamily: 'var(--font-display)' }}>
+                {user.email?.charAt(0).toUpperCase() || '?'}
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-[var(--metal-bright)] truncate">{user.email}</p>
+              <div className="flex items-center gap-1 mt-0.5">
+                <Cloud className="w-2.5 h-2.5 text-[var(--forge-green)]" />
+                <p className="text-[10px] text-[var(--forge-green)] font-light">Synced</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Navigation */}

@@ -1,11 +1,12 @@
 "use client"
 
-import { Menu, ArrowLeft, Download, Upload, Calendar, Bell, Shield } from "lucide-react"
+import { Menu, ArrowLeft, Download, Upload, Calendar, Bell, Shield, User, LogOut, Cloud } from "lucide-react"
 import { useState } from "react"
 import type { Task } from "@/app/page"
 import { exportData, importData } from "@/lib/storage-idb"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
 import { requestWebNotificationPermission, isWebNotificationSupported } from "@/lib/web-notifications"
+import { useAuth } from "@/lib/auth-context"
 
 interface SettingsScreenProps {
   tasks: Task[]
@@ -15,12 +16,23 @@ interface SettingsScreenProps {
 }
 
 export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImported }: SettingsScreenProps) {
+  const { user, signOut } = useAuth()
   const [notificationStatus, setNotificationStatus] = useState<string>(
     typeof window !== 'undefined' && 'Notification' in window 
       ? Notification.permission 
       : 'not-supported'
   )
   const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [signingOut, setSigningOut] = useState(false)
+
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    try {
+      await signOut()
+    } catch {
+      setSigningOut(false)
+    }
+  }
 
   const handleExportData = async () => {
     try {
@@ -119,6 +131,43 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
       {/* Settings Container */}
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="max-w-md mx-auto space-y-4">
+
+          {/* Account Section */}
+          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up">
+            <h2 
+              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider flex items-center gap-2"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
+            >
+              <User className="w-4 h-4" />
+              ACCOUNT
+            </h2>
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--ember)]/20 flex items-center justify-center">
+                  <span className="text-[var(--ember)] font-bold text-sm" style={{ fontFamily: 'var(--font-display)' }}>
+                    {user?.email?.charAt(0).toUpperCase() || '?'}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[var(--metal-bright)] truncate">{user?.email || 'Unknown'}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <Cloud className="w-3 h-3 text-[var(--forge-green)]" />
+                    <p className="text-xs text-[var(--forge-green)] font-light">Synced across devices</p>
+                  </div>
+                </div>
+              </div>
+              
+              <button
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--forge-red)]/30 rounded-xl text-[var(--forge-red)] hover:bg-[var(--forge-red)]/10 disabled:opacity-50 transition-all duration-300 text-sm"
+              >
+                <LogOut className="w-4 h-4" />
+                {signingOut ? 'Signing out...' : 'Sign Out'}
+              </button>
+            </div>
+          </div>
           
           {/* Notifications Section */}
           <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up stagger-1">
@@ -240,7 +289,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-[var(--metal-muted)] font-light">Version</span>
-                <span className="text-[var(--metal-bright)]">1.1.0 (PWA)</span>
+                <span className="text-[var(--metal-bright)]">2.0.0 (Cloud Sync)</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--metal-muted)] font-light">Tasks</span>
@@ -248,7 +297,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--metal-muted)] font-light">Storage</span>
-                <span className="text-[var(--metal-bright)]">IndexedDB (Offline)</span>
+                <span className="text-[var(--metal-bright)]">Cloud (Firebase)</span>
               </div>
             </div>
           </div>
