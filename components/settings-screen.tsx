@@ -3,10 +3,10 @@
 import { Menu, ArrowLeft, Download, Upload, Calendar, Bell, Shield, User, LogOut, Cloud } from "lucide-react"
 import { useState } from "react"
 import type { Task } from "@/app/page"
-import { exportData, importData } from "@/lib/storage-idb"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
 import { requestWebNotificationPermission, isWebNotificationSupported } from "@/lib/web-notifications"
 import { useAuth } from "@/lib/auth-context"
+import { createCloudTask } from "@/lib/storage-cloud"
 
 interface SettingsScreenProps {
   tasks: Task[]
@@ -36,7 +36,8 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
 
   const handleExportData = async () => {
     try {
-      const jsonData = await exportData()
+      // Export current tasks (from Firestore) as JSON
+      const jsonData = JSON.stringify(tasks, null, 2)
       const blob = new Blob([jsonData], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       
@@ -60,20 +61,40 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
-      if (!file) return
+      if (!file || !user) return
       
       try {
         const text = await file.text()
-        const result = await importData(text)
+        const parsed = JSON.parse(text)
         
-        if (result.success) {
-          setImportResult({ success: true, message: `Successfully imported ${result.count} tasks.` })
-          onDataImported()
-        } else {
-          setImportResult({ success: false, message: result.error || 'Import failed.' })
+        // Support both array format and {tasks: [...]} format
+        const tasksArray = Array.isArray(parsed) ? parsed : parsed.tasks
+        
+        if (!Array.isArray(tasksArray)) {
+          setImportResult({ success: false, message: 'Invalid format. Expected an array of tasks.' })
+          setTimeout(() => setImportResult(null), 3000)
+          return
         }
+
+        let imported = 0
+        for (const task of tasksArray) {
+          if (task.title) {
+            await createCloudTask(user.uid, {
+              title: task.title,
+              detail: task.detail || task.description,
+              photo: task.photo,
+              alarm: task.alarm,
+              repeats: task.repeats,
+              dueDate: task.dueDate,
+            })
+            imported++
+          }
+        }
+        
+        setImportResult({ success: true, message: `Successfully imported ${imported} tasks.` })
+        onDataImported()
       } catch (error) {
-        setImportResult({ success: false, message: 'Failed to read file.' })
+        setImportResult({ success: false, message: 'Failed to read or parse file.' })
       }
       
       // Clear message after 3 seconds
