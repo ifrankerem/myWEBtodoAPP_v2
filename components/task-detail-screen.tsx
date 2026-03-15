@@ -24,6 +24,7 @@ export default function TaskDetailScreen({
 }: TaskDetailScreenProps) {
   const [isAnimating, setIsAnimating] = useState(false)
   const [localCompleted, setLocalCompleted] = useState(task.completed)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   
   // Edit form state
@@ -168,8 +169,15 @@ export default function TaskDetailScreen({
         <div className="max-w-md mx-auto border border-[var(--obsidian-border)] rounded-2xl overflow-hidden bg-[var(--obsidian-1)] animate-scale-in stagger-1">
           {/* Photo if exists */}
           {task.photo && (
-            <div className="w-full aspect-[4/3] overflow-hidden">
-              <img src={task.photo || "/placeholder.svg"} alt={task.name} className="w-full h-full object-cover" />
+            <div 
+              className="w-full aspect-[4/3] overflow-hidden cursor-pointer group"
+              onClick={() => !isEditing && setLightboxOpen(true)}
+            >
+              <img 
+                src={task.photo || "/placeholder.svg"} 
+                alt={task.name} 
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
+              />
             </div>
           )}
 
@@ -438,6 +446,26 @@ export default function TaskDetailScreen({
           </>
         )}
       </div>
+      {/* Photo Lightbox */}
+      {lightboxOpen && task.photo && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in"
+          onClick={() => setLightboxOpen(false)}
+        >
+          <button
+            onClick={() => setLightboxOpen(false)}
+            className="absolute top-6 right-6 w-12 h-12 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all z-10"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img 
+            src={task.photo} 
+            alt={task.name} 
+            className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }
