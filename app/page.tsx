@@ -202,41 +202,9 @@ export default function Page() {
   const handleAddTask = async (newTask: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => {
     if (!user) return
 
-    let photoBase64: string | undefined
-    
-    if (photoFile) {
-      photoBase64 = await fileToBase64(photoFile)
-    }
-    
-    const created = await createCloudTask(user.uid, {
-      title: newTask.title || newTask.name,
-      detail: newTask.detail,
-      photo: photoBase64,
-      alarm: newTask.alarm,
-      repeats: newTask.repeats,
-      dueDate: newTask.dueDate,
-    })
-    
-    // Schedule notification if alarm is set
-    if (newTask.alarm) {
-      scheduleTaskNotification({
-        id: created.id,
-        title: created.title,
-        alarm: created.alarm,
-        repeats: created.repeats,
-      })
-      
-      startForegroundReminder({
-        id: created.id,
-        title: created.title,
-        alarm: created.alarm,
-        repeats: created.repeats,
-        dueDate: created.dueDate,
-      })
-    }
-    
+    // Navigate back immediately so offline doesn't block the UI
     setCurrentScreen("tasks")
-    
+
     // Easter egg: Check if due date is December 20
     if (newTask.dueDate) {
       const dueDate = new Date(newTask.dueDate)
@@ -244,6 +212,46 @@ export default function Page() {
         setShowEasterEgg(true)
       }
     }
+
+    // Fire-and-forget: Firestore will queue offline writes automatically
+    ;(async () => {
+      try {
+        let photoBase64: string | undefined
+        
+        if (photoFile) {
+          photoBase64 = await fileToBase64(photoFile)
+        }
+        
+        const created = await createCloudTask(user.uid, {
+          title: newTask.title || newTask.name,
+          detail: newTask.detail,
+          photo: photoBase64,
+          alarm: newTask.alarm,
+          repeats: newTask.repeats,
+          dueDate: newTask.dueDate,
+        })
+        
+        // Schedule notification if alarm is set
+        if (newTask.alarm) {
+          scheduleTaskNotification({
+            id: created.id,
+            title: created.title,
+            alarm: created.alarm,
+            repeats: created.repeats,
+          })
+          
+          startForegroundReminder({
+            id: created.id,
+            title: created.title,
+            alarm: created.alarm,
+            repeats: created.repeats,
+            dueDate: created.dueDate,
+          })
+        }
+      } catch (err) {
+        console.error('Error creating task:', err)
+      }
+    })()
   }
 
   const handleDeleteTask = async (taskId: string) => {
