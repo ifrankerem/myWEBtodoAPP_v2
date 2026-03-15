@@ -10,7 +10,7 @@ import {
   signInWithPopup,
   type User,
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { getAuthInstance } from './firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -31,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const auth = getAuthInstance();
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
@@ -42,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     try {
       setError(null);
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(getAuthInstance(), email, password);
     } catch (err: any) {
       const message = getAuthErrorMessage(err.code);
       setError(message);
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string) => {
     try {
       setError(null);
-      await createUserWithEmailAndPassword(auth, email, password);
+      await createUserWithEmailAndPassword(getAuthInstance(), email, password);
     } catch (err: any) {
       const message = getAuthErrorMessage(err.code);
       setError(message);
@@ -65,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setError(null);
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithPopup(getAuthInstance(), provider);
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user') return;
       const message = getAuthErrorMessage(err.code);
@@ -77,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       setError(null);
-      await firebaseSignOut(auth);
+      await firebaseSignOut(getAuthInstance());
     } catch (err: any) {
       setError('Failed to sign out. Please try again.');
       throw err;

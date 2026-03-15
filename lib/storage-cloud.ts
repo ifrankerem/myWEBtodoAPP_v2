@@ -17,17 +17,17 @@ import {
   serverTimestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { getDbInstance } from './firebase';
 import type { TaskRecord } from './storage-idb';
 
 // Get the tasks collection path for a user
 function tasksCollection(userId: string) {
-  return collection(db, 'users', userId, 'tasks');
+  return collection(getDbInstance(), 'users', userId, 'tasks');
 }
 
 // Get a specific task document reference
 function taskDoc(userId: string, taskId: string) {
-  return doc(db, 'users', userId, 'tasks', taskId);
+  return doc(getDbInstance(), 'users', userId, 'tasks', taskId);
 }
 
 // Generate unique ID (same as storage-idb)
@@ -159,7 +159,7 @@ export async function saveCloudTasks(
   tasks: TaskRecord[]
 ): Promise<void> {
   try {
-    const batch = writeBatch(db);
+    const batch = writeBatch(getDbInstance());
 
     // Delete all existing tasks
     const existing = await getDocs(tasksCollection(userId));
@@ -193,7 +193,7 @@ export async function migrateLocalToCloud(
     }
 
     // Upload all local tasks to Firestore
-    const batch = writeBatch(db);
+    const batch = writeBatch(getDbInstance());
     localTasks.forEach((task) => {
       const ref = taskDoc(userId, task.id);
       batch.set(ref, stripUndefined(task) as TaskRecord);
