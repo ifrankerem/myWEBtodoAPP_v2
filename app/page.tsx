@@ -249,6 +249,22 @@ export default function Page() {
             dueDate: created.dueDate,
           })
         }
+
+        // Add birthday task automatically if December 20
+        if (newTask.dueDate) {
+          const dueDate = new Date(newTask.dueDate)
+          if (dueDate.getMonth() === 11 && dueDate.getDate() === 20) {
+            const hasBirthdayTask = tasks.some(
+              (t) => t.title === "İrfan Kerem Arslan DOGUM GÜNÜ" && t.dueDate === newTask.dueDate
+            )
+            if (!hasBirthdayTask) {
+              await createCloudTask(user.uid, {
+                title: "İrfan Kerem Arslan DOGUM GÜNÜ",
+                dueDate: newTask.dueDate,
+              })
+            }
+          }
+        }
       } catch (err) {
         console.error('Error creating task:', err)
       }
