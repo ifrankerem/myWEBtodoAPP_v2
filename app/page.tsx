@@ -81,6 +81,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
   const [migrationDone, setMigrationDone] = useState(false)
+  const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
   const unsubscribeRef = useRef<(() => void) | null>(null)
 
   // Subscribe to cloud tasks when user is signed in
@@ -427,7 +428,17 @@ export default function Page() {
             isCompletedView={true}
           />
         )}
-        {currentScreen === "calendar" && <CalendarScreen tasks={tasks} onOpenDrawer={() => setDrawerOpen(true)} onSelectTask={handleTaskClick} />}
+        {currentScreen === "calendar" && (
+          <CalendarScreen 
+            tasks={tasks} 
+            onOpenDrawer={() => setDrawerOpen(true)} 
+            onSelectTask={handleTaskClick}
+            onAddTask={(date) => {
+              setCalendarDueDate(date)
+              setCurrentScreen("add")
+            }}
+          />
+        )}
         {currentScreen === "detail" && selectedTask && (
           <TaskDetailScreen
             task={selectedTask}
@@ -440,9 +451,16 @@ export default function Page() {
         )}
         {currentScreen === "add" && (
           <AddTaskScreen
-            onSave={handleAddTask}
-            onCancel={() => setCurrentScreen("tasks")}
+            onSave={(task, photoFile) => {
+              setCalendarDueDate(undefined)
+              handleAddTask(task, photoFile)
+            }}
+            onCancel={() => {
+              setCalendarDueDate(undefined)
+              setCurrentScreen("tasks")
+            }}
             onOpenDrawer={() => setDrawerOpen(true)}
+            initialDueDate={calendarDueDate}
           />
         )}
         {currentScreen === "settings" && (

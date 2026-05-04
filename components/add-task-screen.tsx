@@ -9,9 +9,10 @@ interface AddTaskScreenProps {
   onSave: (task: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => void
   onCancel: () => void
   onOpenDrawer: () => void
+  initialDueDate?: string
 }
 
-export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer }: AddTaskScreenProps) {
+export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialDueDate }: AddTaskScreenProps) {
   const [title, setTitle] = useState("")
   const [detail, setDetail] = useState("")
   const [photoFile, setPhotoFile] = useState<File | null>(null)
@@ -20,7 +21,7 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer }: AddTas
   const [alarmTime, setAlarmTime] = useState("12:00")
   const [isRepetitive, setIsRepetitive] = useState(false)
   const [selectedDays, setSelectedDays] = useState<string[]>([])
-  const [dueDate, setDueDate] = useState("")
+  const [dueDate, setDueDate] = useState(initialDueDate || "")
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   const toggleDay = (day: string) => {
     setSelectedDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]))

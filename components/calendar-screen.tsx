@@ -1,6 +1,6 @@
 "use client"
 
-import { Menu, ChevronLeft, ChevronRight, Bell, Repeat, CalendarDays, LayoutGrid, List, ArrowRight } from "lucide-react"
+import { Menu, ChevronLeft, ChevronRight, Bell, Repeat, CalendarDays, LayoutGrid, List, ArrowRight, Plus } from "lucide-react"
 import { useState, useEffect } from "react"
 import type { Task } from "@/app/page"
 
@@ -8,6 +8,7 @@ interface CalendarScreenProps {
   tasks: Task[]
   onOpenDrawer: () => void
   onSelectTask?: (task: Task) => void
+  onAddTask?: (prefilledDate: string) => void
 }
 
 const monthNames = [
@@ -22,7 +23,7 @@ const monthNamesShort = [
 
 type CalendarView = "grid" | "schedule"
 
-export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask }: CalendarScreenProps) {
+export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAddTask }: CalendarScreenProps) {
   const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
   const daysOfWeekShort = ["M", "T", "W", "T", "F", "S", "S"]
   const daysOfWeekFull = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -325,12 +326,28 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask }: Ca
 
               {/* Selected Day Tasks */}
               <div className="border-t border-[var(--obsidian-border)] pt-6">
-                <h3 
-                  className="text-sm text-[var(--metal-muted)] mb-4 tracking-wide"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
-                  {isToday(selectedDate) ? "Today's Tasks" : `Tasks for ${monthNames[month]} ${selectedDate}, ${year}`}
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 
+                    className="text-sm text-[var(--metal-muted)] tracking-wide"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    {isToday(selectedDate) ? "Today's Tasks" : `Tasks for ${monthNames[month]} ${selectedDate}, ${year}`}
+                  </h3>
+                  {onAddTask && (
+                    <button
+                      onClick={() => {
+                        const mm = String(month + 1).padStart(2, '0')
+                        const dd = String(selectedDate).padStart(2, '0')
+                        onAddTask(`${year}-${mm}-${dd}`)
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--ember)] text-[var(--obsidian)] hover:brightness-110 active:scale-95 transition-all duration-200 shadow-[0_2px_10px_rgba(var(--ember-rgb),0.3)] animate-fade-in"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      Add Task
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-3">
                   {selectedDateTasks.length > 0 ? (
                     selectedDateTasks.map((task, i) => (
@@ -538,12 +555,28 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask }: Ca
             {/* Selected Day Tasks Panel */}
             {selectedDate && (
               <div className="mt-4 border border-[var(--obsidian-border)] rounded-2xl p-5 bg-[var(--obsidian-1)] animate-fade-in">
-                <h3 
-                  className="text-sm text-[var(--metal-muted)] mb-4 tracking-wide"
-                  style={{ fontFamily: 'var(--font-display)' }}
-                >
-                  {isToday(selectedDate) ? "Today's Tasks" : `Tasks for ${monthNames[month]} ${selectedDate}, ${year}`}
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 
+                    className="text-sm text-[var(--metal-muted)] tracking-wide"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    {isToday(selectedDate) ? "Today's Tasks" : `Tasks for ${monthNames[month]} ${selectedDate}, ${year}`}
+                  </h3>
+                  {onAddTask && (
+                    <button
+                      onClick={() => {
+                        const mm = String(month + 1).padStart(2, '0')
+                        const dd = String(selectedDate).padStart(2, '0')
+                        onAddTask(`${year}-${mm}-${dd}`)
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--ember)] text-[var(--obsidian)] hover:brightness-110 active:scale-95 transition-all duration-200 shadow-[0_2px_10px_rgba(var(--ember-rgb),0.3)] animate-fade-in"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                      Add Task
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-1">
                   {getTasksForDay(selectedDate).length > 0 ? (
                     getTasksForDay(selectedDate).map((task, i) => (
