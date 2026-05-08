@@ -4,6 +4,7 @@ import type React from "react"
 import { useState } from "react"
 import { Menu, ImageIcon, X, Check } from "lucide-react"
 import type { Task } from "@/app/page"
+import { compressImage } from "@/lib/storage-idb"
 
 interface AddTaskScreenProps {
   onSave: (task: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => void
@@ -31,7 +32,14 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialD
     if (file) {
       setPhotoFile(file)
       const reader = new FileReader()
-      reader.onloadend = () => { setPhotoPreview(reader.result as string) }
+      reader.onloadend = () => {
+        const raw = reader.result as string
+        compressImage(raw).then((compressed) => {
+          setPhotoPreview(compressed)
+        }).catch(() => {
+          setPhotoPreview(raw)
+        })
+      }
       reader.readAsDataURL(file)
     }
   }

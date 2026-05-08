@@ -163,11 +163,62 @@ export async function toggleTaskComplete(id: string): Promise<TaskRecord | null>
   }
 }
 
-// Convert File to Base64
+// Compress and resize an image to fit within Firestore's 1MB document limit
+// Returns a base64 data URL
+export function compressImage(
+  src: string,
+  maxWidth = 1200,
+  maxHeight = 1200,
+  quality = 0.7,
+  maxSizeBytes = 700_000 // keep well under 1MB Firestore limit
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+
+      // Scale down proportionally
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Iteratively reduce quality until size is acceptable
+      let q = quality;
+      let result = canvas.toDataURL('image/jpeg', q);
+      while (result.length > maxSizeBytes && q > 0.1) {
+        q -= 0.1;
+        result = canvas.toDataURL('image/jpeg', q);
+      }
+
+      resolve(result);
+    };
+    img.onerror = () => reject(new Error('Failed to load image for compression'));
+    img.src = src;
+  });
+}
+
+// Convert File to compressed Base64
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = () => {
+      const raw = reader.result as string;
+      // Compress image files, pass through others
+      if (file.type.startsWith('image/')) {
+        compressImage(raw).then(resolve).catch(reject);
+      } else {
+        resolve(raw);
+      }
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });

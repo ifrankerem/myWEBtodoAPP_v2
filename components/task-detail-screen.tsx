@@ -4,6 +4,7 @@ import { Menu, ArrowLeft, CheckCircle, Pencil, X, Save, Trash2, Check, ImageIcon
 import type React from "react"
 import { useState } from "react"
 import type { Task } from "@/app/page"
+import { compressImage } from "@/lib/storage-idb"
 
 interface TaskDetailScreenProps {
   task: Task
@@ -59,8 +60,14 @@ export default function TaskDetailScreen({
     if (file) {
       const reader = new FileReader()
       reader.onloadend = () => {
-        setEditPhoto(reader.result as string)
-        setPhotoRemoved(false)
+        const raw = reader.result as string
+        compressImage(raw).then((compressed) => {
+          setEditPhoto(compressed)
+          setPhotoRemoved(false)
+        }).catch(() => {
+          setEditPhoto(raw)
+          setPhotoRemoved(false)
+        })
       }
       reader.readAsDataURL(file)
     }
