@@ -1,10 +1,12 @@
 "use client"
 
-import { Menu, ArrowLeft, CheckCircle, Pencil, X, Save, Trash2, Check, ImageIcon } from "lucide-react"
+import { CheckCircle, Pencil, X, Trash2, Check, ImageIcon } from "lucide-react"
 import type React from "react"
 import { useState } from "react"
 import type { Task } from "@/app/page"
 import { compressImage } from "@/lib/storage-idb"
+import { XpHeader, XpStatusBar } from "@/components/xp-ui"
+import { parseTaskDate } from "@/lib/task-dates"
 
 interface TaskDetailScreenProps {
   task: Task
@@ -82,7 +84,14 @@ export default function TaskDetailScreen({
     setIsAnimating(true)
     setLocalCompleted(!localCompleted)
 
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const audioWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext }
+    const AudioContextConstructor = window.AudioContext || audioWindow.webkitAudioContext
+    if (!AudioContextConstructor) {
+      onToggleComplete(task.id)
+      setIsAnimating(false)
+      return
+    }
+    const audioContext = new AudioContextConstructor()
     const oscillator = audioContext.createOscillator()
     const gainNode = audioContext.createGain()
 
@@ -125,9 +134,10 @@ export default function TaskDetailScreen({
 
   const handleSaveEdit = () => {
     if (onUpdateTask) {
+      const normalizedTitle = editTitle.trim() || "Untitled Task"
       onUpdateTask(task.id, {
-        title: editTitle,
-        name: editTitle,
+        title: normalizedTitle,
+        name: normalizedTitle,
         detail: editDetail || undefined,
         dueDate: editDueDate || undefined,
         alarm: editAlarmEnabled && editAlarm ? editAlarm : undefined,
@@ -154,325 +164,97 @@ export default function TaskDetailScreen({
   }
 
   return (
-    <div className="h-screen flex flex-col bg-transparent relative">
-      {/* Header */}
-      <div className="flex items-center justify-between p-6 pb-4 animate-fade-in">
-        <button onClick={onOpenDrawer} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <Menu className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-        <h1 
-          className="text-sm font-bold tracking-[0.2em] text-[var(--metal-muted)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {isEditing ? "EDIT TASK" : "TASK DETAILS"}
-        </h1>
-        <button onClick={onBack} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <ArrowLeft className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-      </div>
+    <section className="xp-screen" aria-label={isEditing ? "Edit Task" : "Task Details"}>
+      <XpHeader title={isEditing ? "Edit Task" : "Task Details"} onOpenDrawer={onOpenDrawer} onBack={onBack} />
 
-      {/* Task Detail Container */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-md mx-auto border border-[var(--obsidian-border)] rounded-2xl overflow-hidden bg-[var(--obsidian-1)] animate-scale-in stagger-1">
-          {/* Photo if exists */}
-          {task.photo && (
-            <div 
-              className="w-full aspect-[4/3] overflow-hidden cursor-pointer group"
-              onClick={() => !isEditing && setLightboxOpen(true)}
-            >
-              <img 
-                src={task.photo || "/placeholder.svg"} 
-                alt={task.name} 
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
-              />
-            </div>
-          )}
-
-          <div className="p-6 space-y-6">
-            {isEditing ? (
-              /* Edit Mode */
-              <>
-                {/* Photo */}
-                <div>
-                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>PHOTO</label>
-                  {editPhoto ? (
-                    <div className="relative">
-                      <img 
-                        src={editPhoto} 
-                        alt="Task photo" 
-                        className="w-full aspect-video rounded-lg object-cover"
-                      />
-                      <div className="absolute bottom-2 right-2 flex gap-2">
-                        <label className="p-2 bg-black/70 rounded-full cursor-pointer hover:bg-black/90">
-                          <ImageIcon className="w-4 h-4 text-white" />
-                          <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-                        </label>
-                        <button
-                          onClick={handleRemovePhoto}
-                          className="p-2 bg-[var(--forge-red)]/80 rounded-full hover:bg-[var(--forge-red)]"
-                        >
-                          <X className="w-4 h-4 text-white" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <label className="flex items-center justify-center gap-2 px-4 py-6 bg-[var(--obsidian)] border border-[var(--obsidian-border)] border-dashed rounded-lg text-[var(--metal-muted)] hover:border-[var(--ember)] transition-all duration-300 cursor-pointer">
-                      <ImageIcon className="w-5 h-5" />
-                      <span>Add Photo</span>
-                      <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-                    </label>
-                  )}
+      <main className="xp-content">
+        <div className="xp-property-sheet">
+          {isEditing ? (
+            <>
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">General</span>
+                <div className="xp-form-grid">
+                  <div className="xp-field"><label htmlFor="edit-title">Title</label><input id="edit-title" type="text" value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></div>
+                  <div className="xp-field"><label htmlFor="edit-detail">Details</label><textarea id="edit-detail" value={editDetail} onChange={(event) => setEditDetail(event.target.value)} rows={5} /></div>
+                  <div className="xp-field"><label htmlFor="edit-due-date">Due date</label><input id="edit-due-date" type="date" value={editDueDate} onChange={(event) => setEditDueDate(event.target.value)} /></div>
                 </div>
+              </section>
 
-                {/* Title */}
-                <div>
-                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>TITLE</label>
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300"
-                  />
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">Picture</span>
+                <div className="xp-photo-row">
+                  {editPhoto && <div className="xp-detail-photo"><img src={editPhoto} alt="Task" /></div>}
+                  <label className="xp-button xp-file-button"><ImageIcon /> Browse...<input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" /></label>
+                  {editPhoto && <button type="button" className="xp-button xp-button-danger" onClick={handleRemovePhoto}><X /> Remove</button>}
                 </div>
+              </section>
 
-                {/* Detail */}
-                <div>
-                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>DETAILS</label>
-                  <textarea
-                    value={editDetail}
-                    onChange={(e) => setEditDetail(e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 resize-none"
-                  />
-                </div>
-
-                {/* Due Date */}
-                <div>
-                  <label className="block text-xs text-[var(--metal-muted)] mb-2 tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>DUE DATE</label>
-                  <input
-                    type="date"
-                    value={editDueDate}
-                    onChange={(e) => setEditDueDate(e.target.value)}
-                    className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]"
-                  />
-                </div>
-
-                {/* Alarm */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs text-[var(--metal-muted)] tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>ALARM</label>
-                    <button
-                      onClick={() => setEditAlarmEnabled(!editAlarmEnabled)}
-                      className={`px-4 py-1 rounded-full text-xs border transition-all duration-300 ${
-                        editAlarmEnabled 
-                          ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.3)]" 
-                          : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"
-                      }`}
-                    >
-                      {editAlarmEnabled ? "ON" : "OFF"}
-                    </button>
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">Reminder</span>
+                <div className="xp-form-grid">
+                  <div className="xp-option-row">
+                    <label className="xp-checkbox-label"><input type="checkbox" checked={editAlarmEnabled} onChange={(event) => setEditAlarmEnabled(event.target.checked)} /> Enable alarm</label>
+                    <input aria-label="Alarm time" type="time" value={editAlarm} onChange={(event) => setEditAlarm(event.target.value)} disabled={!editAlarmEnabled} />
                   </div>
-                  {editAlarmEnabled && (
-                    <input
-                      type="time"
-                      value={editAlarm}
-                      onChange={(e) => setEditAlarm(e.target.value)}
-                      className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]"
-                    />
-                  )}
+                  <label className="xp-checkbox-label"><input type="checkbox" checked={editIsRepetitive} onChange={(event) => setEditIsRepetitive(event.target.checked)} /> Repeat on selected days</label>
+                  {editIsRepetitive && <div className="xp-day-picker">{days.map((day) => <button key={day} type="button" className="xp-button" aria-pressed={editRepeats.includes(day)} onClick={() => toggleDay(day)}>{day}</button>)}</div>}
                 </div>
-
-                {/* Repeat Days */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs text-[var(--metal-muted)] tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>REPEAT</label>
-                    <button
-                      onClick={() => setEditIsRepetitive(!editIsRepetitive)}
-                      className={`px-4 py-1 rounded-full text-xs border transition-all duration-300 ${
-                        editIsRepetitive 
-                          ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.3)]" 
-                          : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"
-                      }`}
-                    >
-                      {editIsRepetitive ? "ON" : "OFF"}
-                    </button>
-                  </div>
-                  {editIsRepetitive && (
-                    <div className="flex gap-2 flex-wrap">
-                      {days.map((day) => (
-                        <button
-                          key={day}
-                          onClick={() => toggleDay(day)}
-                          className={`px-3 py-2 rounded-lg border text-xs transition-all duration-300 ${
-                            editRepeats.includes(day)
-                              ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.2)]"
-                              : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)] hover:border-[var(--ember)]"
-                          }`}
-                        >
-                          {day}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              /* View Mode */
-              <>
-                {/* Title */}
-                <div>
-                  <h2 
-                    className="text-xl text-[var(--metal-bright)]"
-                    style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-                  >
-                    {task.title || task.name}
-                  </h2>
-                </div>
-
-                {/* Detail Section */}
-                {task.detail && (
+              </section>
+            </>
+          ) : (
+            <>
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">Task</span>
+                <div className="xp-detail-layout">
+                  {task.photo && <button type="button" className="xp-detail-photo" onClick={() => setLightboxOpen(true)}><img src={task.photo} alt={task.name} /></button>}
                   <div>
-                    <h3 
-                      className="text-xs text-[var(--metal-muted)] mb-3 tracking-wider"
-                      style={{ fontFamily: 'var(--font-display)' }}
-                    >
-                      DETAIL
-                    </h3>
-                    <p className="text-sm text-[var(--metal-bright)] leading-relaxed font-light">{task.detail}</p>
-                  </div>
-                )}
-
-                <div className="border-t border-[var(--obsidian-border)] pt-6">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-[var(--metal-muted)] font-light">Status:</span>
-                    <button
-                      onClick={handleToggleComplete}
-                      className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-300 ${
-                        isAnimating ? "scale-95" : "scale-100"
-                      } ${
-                        localCompleted
-                          ? "bg-[var(--forge-green)]/15 text-[var(--forge-green)] border border-[var(--forge-green)]/30 hover:bg-[var(--forge-green)]/25 active:scale-90 shadow-[0_0_10px_rgba(var(--forge-green-rgb),0.15)]"
-                          : "bg-[var(--obsidian-2)] text-[var(--metal-muted)] border border-[var(--obsidian-border)] hover:bg-[var(--obsidian-border)] active:scale-90"
-                      }`}
-                    >
-                      <CheckCircle
-                        className={`w-4 h-4 transition-transform duration-300 ${
-                          isAnimating ? "rotate-180 scale-110" : "rotate-0"
-                        }`}
-                      />
-                      <span className="text-xs font-medium tracking-wider">
-                        {localCompleted ? "COMPLETED" : "INCOMPLETE"}
-                      </span>
-                    </button>
+                    <h2 className="xp-detail-title">{task.title || task.name}</h2>
+                    <p className="xp-detail-copy">{task.detail || "No details were added to this task."}</p>
                   </div>
                 </div>
+              </section>
 
-                {/* Metadata */}
-                <div className="border-t border-[var(--obsidian-border)] pt-6 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-[var(--metal-muted)] font-light">Created Date:</span>
-                    <span className="text-sm text-[var(--metal-bright)]">{formatDate(task.createdDate)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-[var(--metal-muted)] font-light">Last Edited Date:</span>
-                    <span className="text-sm text-[var(--metal-bright)]">{formatDate(task.lastEditedDate)}</span>
-                  </div>
-                  {task.dueDate && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-[var(--metal-muted)] font-light">Due Date:</span>
-                      <span className="text-sm text-[var(--metal-bright)]">
-                        {new Date(task.dueDate).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  {task.alarm && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-[var(--metal-muted)] font-light">Alarm:</span>
-                      <span className="text-sm text-[var(--forge-orange)]">{task.alarm}</span>
-                    </div>
-                  )}
-                  {task.repeats && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-[var(--metal-muted)] font-light">Repeats:</span>
-                      <span className="text-sm text-[var(--ember)]">{task.repeats}</span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">Status</span>
+                <button type="button" className="xp-button" aria-pressed={Boolean(localCompleted)} onClick={handleToggleComplete}>
+                  <CheckCircle className={isAnimating ? "rotate-180" : ""} />
+                  {localCompleted ? "Completed" : "Incomplete"}
+                </button>
+              </section>
+
+              <section className="xp-groupbox">
+                <span className="xp-groupbox-title">Information</span>
+                <dl className="xp-details-list">
+                  <div><dt>Created</dt><dd>{formatDate(task.createdDate)}</dd></div>
+                  <div><dt>Last edited</dt><dd>{formatDate(task.lastEditedDate)}</dd></div>
+                  {task.dueDate && <div><dt>Due date</dt><dd>{parseTaskDate(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</dd></div>}
+                  {task.alarm && <div><dt>Alarm</dt><dd>{task.alarm}</dd></div>}
+                  {task.repeats && <div><dt>Repeats</dt><dd>{task.repeats}</dd></div>}
+                </dl>
+              </section>
+            </>
+          )}
         </div>
-      </div>
+      </main>
 
-      {/* Floating Action Buttons */}
-      <div className="fixed bottom-8 right-6 flex flex-col gap-3 z-30">
+      <div className="xp-actionbar">
         {isEditing ? (
-          <>
-            {/* Cancel Edit Button */}
-            <button
-              onClick={handleCancelEdit}
-              className="w-14 h-14 rounded-full bg-[var(--obsidian-2)] text-[var(--metal-muted)] flex items-center justify-center shadow-lg hover:bg-[var(--obsidian-border)] active:scale-95 transition-all"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            
-            {/* Save Button - Primary */}
-            <button
-              onClick={handleSaveEdit}
-              className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)]"
-            >
-              <Check className="w-7 h-7" strokeWidth={2.5} />
-            </button>
-          </>
+          <><button type="button" className="xp-button" onClick={handleCancelEdit}><X /> Cancel</button><button type="button" className="xp-button xp-primary-button" onClick={handleSaveEdit}><Check /> Save</button></>
         ) : (
-          <>
-            {/* Delete Button */}
-            <button
-              onClick={() => {
-                if (onDeleteTask) {
-                  onDeleteTask(task.id);
-                  onBack();
-                }
-              }}
-              className="w-14 h-14 rounded-full bg-[var(--forge-red)] text-white flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_20px_rgba(var(--forge-red-rgb),0.4)] animate-fade-in-up stagger-1"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-            
-            {/* Edit Button - Primary */}
-            <button
-              onClick={() => setIsEditing(true)}
-              className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)] animate-fade-in-up stagger-2"
-            >
-              <Pencil className="w-6 h-6" />
-            </button>
-          </>
+          <><button type="button" className="xp-button xp-button-danger" onClick={() => { if (onDeleteTask) { onDeleteTask(task.id); onBack() } }}><Trash2 /> Delete</button><button type="button" className="xp-button xp-primary-button" onClick={() => setIsEditing(true)}><Pencil /> Edit</button></>
         )}
       </div>
-      {/* Photo Lightbox */}
+      <XpStatusBar><span className="flex-1">{localCompleted ? "Task completed" : "Ready"}</span><span>{task.type}</span></XpStatusBar>
+
       {lightboxOpen && task.photo && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in"
-          onClick={() => setLightboxOpen(false)}
-        >
-          <button
-            onClick={() => setLightboxOpen(false)}
-            className="absolute top-6 right-6 w-12 h-12 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all z-10"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <img 
-            src={task.photo} 
-            alt={task.name} 
-            className="max-w-[95vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
+        <div className="xp-modal-backdrop" onClick={() => setLightboxOpen(false)}>
+          <div className="xp-dialog" role="dialog" aria-modal="true" aria-label={`${task.title} picture`} onClick={(event) => event.stopPropagation()}>
+            <div className="xp-titlebar"><div className="xp-titlebar-caption">{task.title}</div><button type="button" className="xp-dialog-close" onClick={() => setLightboxOpen(false)} aria-label="Close"><X /></button></div>
+            <div className="xp-dialog-body"><img src={task.photo} alt={task.name} className="max-w-[90vw] max-h-[76vh] object-contain" /></div>
+            <div className="xp-actionbar"><button type="button" className="xp-button" onClick={() => setLightboxOpen(false)}>Close</button></div>
+          </div>
         </div>
       )}
-    </div>
+    </section>
   )
 }

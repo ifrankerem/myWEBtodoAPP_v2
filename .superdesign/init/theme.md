@@ -1,0 +1,449 @@
+# Theme
+
+## Part 1 — Compact token summary
+
+### Stack
+
+- Tailwind CSS 4 using CSS-first configuration; there is no `tailwind.config.*` file.
+- Global source actually imported by the App Router: `app/globals.css`.
+- `styles/globals.css` is a separate scaffold-era theme file and is not imported by `app/layout.tsx`.
+- Component library metadata: shadcn/ui `new-york`, CSS variables enabled, Lucide icons.
+
+### Current palette (`app/globals.css`)
+
+- Canvas / deepest surface: `--obsidian: #0b0d10`
+- Raised surface 1: `--obsidian-1: #12151a`
+- Raised surface 2: `--obsidian-2: #1a1e26`
+- Borders: `--obsidian-border: #262b35`
+- Primary accent: `--ember: #e8913a`; glow `--ember-glow: #f5a623`
+- Success: `--forge-green: #7ec87e`
+- Destructive: `--forge-red: #e05252`
+- Secondary warning: `--forge-orange: #d4915c`
+- Primary text: `--metal-bright: #e8ecf0`
+- Muted text: `--metal-muted: #6b7280`
+- Dim text: `--metal-dim: #3b4150`
+- shadcn semantic colors are dark OKLCH values in `:root`; there is no separate `.dark` block in the imported stylesheet.
+
+### Typography
+
+- Body: DM Sans, loaded through `next/font/google` into `--font-body-family` and exposed as Tailwind `font-sans`.
+- Display: Outfit, loaded into `--font-display-family` and exposed as `font-display`.
+- Mono fallback: Geist Mono.
+- Typical screen title: 14px, bold, 0.2em letter spacing.
+- Typical body: 14px, light/regular weight.
+- Prominent page/card heading: 20–24px, Outfit 700.
+
+### Shape, spacing, and elevation
+
+- Base semantic radius: `0.75rem` (12px).
+- Cards commonly use 16px radius (`rounded-2xl`); controls use 8–12px; FABs are circular.
+- Main mobile gutter: 24px (`p-6`).
+- Main content width: `max-w-md` (28rem / 448px).
+- Borders: 1px `--obsidian-border`.
+- Elevation uses black drop shadows plus low-opacity ember/green/red glows.
+
+### Motion
+
+- Main easing: `cubic-bezier(0.16, 1, 0.3, 1)`.
+- Fast/base/slow durations: 300/600/900ms.
+- Page/card entrance: fade + 24px upward movement or scale from 0.92.
+- Stagger utilities: 50ms through 500ms.
+- Reduced-motion media query removes entrance animation.
+
+### Responsive behavior
+
+- UI is mobile-first and fills `100vh` / `min-height: 100vh`.
+- Feature content centers at `max-w-md`.
+- Task list uses a two-column grid at all current widths.
+- Sliding drawer is 75% width capped at 280px.
+- No custom breakpoint tokens are defined; Tailwind defaults apply.
+
+## Part 2 — Raw source dumps
+
+### `app/globals.css` (active global stylesheet)
+
+```css
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.05 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.07 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.07 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.98 0 0);
+  --primary-foreground: oklch(0.15 0 0);
+  --secondary: oklch(0.16 0 0);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.16 0 0);
+  --muted-foreground: oklch(0.55 0 0);
+  --accent: oklch(0.75 0.12 60);
+  --accent-foreground: oklch(0.05 0 0);
+  --destructive: oklch(0.55 0.24 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.16 0 0);
+  --input: oklch(0.16 0 0);
+  --ring: oklch(0.45 0 0);
+  --chart-1: oklch(0.75 0.12 60);
+  --chart-2: oklch(0.65 0.12 210);
+  --chart-3: oklch(0.55 0.18 85);
+  --chart-4: oklch(0.7 0.2 300);
+  --chart-5: oklch(0.6 0.22 45);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.07 0 0);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-primary: oklch(0.98 0 0);
+  --sidebar-primary-foreground: oklch(0.07 0 0);
+  --sidebar-accent: oklch(0.16 0 0);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.16 0 0);
+  --sidebar-ring: oklch(0.45 0 0);
+
+  /* === Obsidian Forge Design Tokens === */
+
+  /* Primary Accent — Warm Ember */
+  --ember: #e8913a;
+  --ember-rgb: 232, 145, 58;
+  --ember-glow: #f5a623;
+
+  /* Semantic Colors */
+  --forge-green: #7ec87e;
+  --forge-green-rgb: 126, 200, 126;
+  --forge-red: #e05252;
+  --forge-red-rgb: 224, 82, 82;
+  --forge-orange: #d4915c;
+  --forge-orange-rgb: 212, 145, 92;
+
+  /* Surface Colors — Obsidian Gradient */
+  --obsidian: #0b0d10;
+  --obsidian-1: #12151a;
+  --obsidian-2: #1a1e26;
+  --obsidian-border: #262b35;
+
+  /* Text — Metal Tones */
+  --metal-bright: #e8ecf0;
+  --metal-muted: #6b7280;
+  --metal-dim: #3b4150;
+
+  /* Motion */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 0.3s;
+  --duration-base: 0.6s;
+  --duration-slow: 0.9s;
+}
+
+@theme inline {
+  --font-sans: var(--font-body-family, 'DM Sans'), "Geist", "Geist Fallback", sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --font-display: var(--font-display-family, 'Outfit'), sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* === Atmospheric Background — Ember Forge === */
+body {
+  background: var(--obsidian);
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 15% 20%, rgba(var(--ember-rgb), 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 80%, rgba(var(--forge-green-rgb), 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(var(--ember-rgb), 0.02) 0%, transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* === Entrance Animations === */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(var(--ember-rgb), 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(var(--ember-rgb), 0.5);
+  }
+}
+
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fadeInUp 0.7s var(--ease-out-expo) forwards;
+}
+
+.animate-scale-in {
+  opacity: 0;
+  animation: scaleIn 0.6s var(--ease-out-expo) forwards;
+}
+
+.animate-fade-in {
+  opacity: 0;
+  animation: fadeIn 0.5s var(--ease-out-expo) forwards;
+}
+
+/* Stagger delays */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+.stagger-7 { animation-delay: 0.35s; }
+.stagger-8 { animation-delay: 0.4s; }
+.stagger-9 { animation-delay: 0.45s; }
+.stagger-10 { animation-delay: 0.5s; }
+
+/* === Existing Animations === */
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg) translate(0, 0);
+  }
+  25% {
+    transform: rotate(-1.5deg) translate(-1px, 0);
+  }
+  75% {
+    transform: rotate(1.5deg) translate(1px, 0);
+  }
+}
+
+.animate-wiggle {
+  animation: wiggle 0.3s ease-in-out infinite;
+}
+
+/* === Ember Glow Utility === */
+.glow-ember {
+  box-shadow: 0 0 15px rgba(var(--ember-rgb), 0.15);
+}
+
+/* === Accessibility === */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-scale-in,
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+  }
+}
+```
+
+### `styles/globals.css` (present but not imported)
+
+```css
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+```
+
+### Tailwind configuration
+
+No `tailwind.config.ts/js` file exists. Tailwind 4 is configured from CSS through `@import`, `@custom-variant`, and `@theme inline`.

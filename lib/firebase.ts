@@ -4,7 +4,12 @@
 
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence, type Firestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -19,7 +24,6 @@ const firebaseConfig = {
 let _app: FirebaseApp | null = null;
 let _auth: Auth | null = null;
 let _db: Firestore | null = null;
-let _persistenceEnabled = false;
 
 function getApp(): FirebaseApp {
   if (!_app) {
@@ -39,23 +43,9 @@ export function getAuthInstance(): Auth {
 // Firestore instance (lazy) + enable offline persistence
 export function getDbInstance(): Firestore {
   if (!_db) {
-    _db = getFirestore(getApp());
-
-    // Enable offline persistence (browser only, once)
-    if (typeof window !== 'undefined' && !_persistenceEnabled) {
-      _persistenceEnabled = true;
-      enableIndexedDbPersistence(_db).catch((err) => {
-        if (err.code === 'failed-precondition') {
-          console.warn('Firestore persistence failed: multiple tabs open');
-        } else if (err.code === 'unimplemented') {
-          console.warn('Firestore persistence not supported in this browser');
-        }
-      });
-    }
+    _db = initializeFirestore(getApp(), {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
   }
   return _db;
 }
-
-// Convenience exports for backward compatibility
-export const auth = typeof window !== 'undefined' ? getAuthInstance() : (null as unknown as Auth);
-export const db = typeof window !== 'undefined' ? getDbInstance() : (null as unknown as Firestore);

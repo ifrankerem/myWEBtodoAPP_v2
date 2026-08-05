@@ -1,12 +1,13 @@
 "use client"
 
-import { Menu, ArrowLeft, Download, Upload, Calendar, Bell, Shield, User, LogOut, Cloud } from "lucide-react"
-import { useState } from "react"
+import { Bell, Calendar, Cloud, Download, LogOut, Shield, Upload, User } from "lucide-react"
+import { useEffect, useState } from "react"
 import type { Task } from "@/app/page"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
-import { requestWebNotificationPermission, isWebNotificationSupported } from "@/lib/web-notifications"
+import { isWebNotificationSupported, requestWebNotificationPermission } from "@/lib/web-notifications"
 import { useAuth } from "@/lib/auth-context"
 import { createCloudTask } from "@/lib/storage-cloud"
+import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 
 interface SettingsScreenProps {
   tasks: Task[]
@@ -15,15 +16,32 @@ interface SettingsScreenProps {
   onDataImported: () => void
 }
 
+type NotificationStatus = NotificationPermission | "not-supported" | "checking"
+type ImportResult = { success: boolean; message: string }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function optionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key]
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
 export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImported }: SettingsScreenProps) {
   const { user, signOut } = useAuth()
-  const [notificationStatus, setNotificationStatus] = useState<string>(
-    typeof window !== 'undefined' && 'Notification' in window 
-      ? Notification.permission 
-      : 'not-supported'
-  )
-  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking")
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+
+  useEffect(() => {
+    setNotificationStatus(isWebNotificationSupported() ? Notification.permission : "not-supported")
+  }, [])
+
+  const showResult = (result: ImportResult) => {
+    setImportResult(result)
+    window.setTimeout(() => setImportResult(null), 3000)
+  }
 
   const handleSignOut = async () => {
     setSigningOut(true)
@@ -34,303 +52,159 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     }
   }
 
-  const handleExportData = async () => {
+  const handleExportData = () => {
     try {
-      // Export current tasks (from Firestore) as JSON
-      const jsonData = JSON.stringify(tasks, null, 2)
-      const blob = new Blob([jsonData], { type: 'application/json' })
+      const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" })
       const url = URL.createObjectURL(blob)
-      
-      const link = document.createElement('a')
+      const link = document.createElement("a")
       link.href = url
-      link.download = `task-manager-backup-${new Date().toISOString().split('T')[0]}.json`
+      link.download = `task-manager-backup-${new Date().toISOString().split("T")[0]}.json`
       document.body.appendChild(link)
       link.click()
-      document.body.removeChild(link)
-      
+      link.remove()
       URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Export failed:', error)
+      console.error("Export failed:", error)
+      showResult({ success: false, message: "Could not export the backup." })
     }
   }
 
   const handleImportData = () => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json'
-    
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0]
+    const input = document.createElement("input")
+    input.type = "file"
+    input.accept = ".json,application/json"
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0]
       if (!file || !user) return
-      
+
       try {
-        const text = await file.text()
-        const parsed = JSON.parse(text)
-        
-        // Support both array format and {tasks: [...]} format
-        const tasksArray = Array.isArray(parsed) ? parsed : parsed.tasks
-        
+        const parsed: unknown = JSON.parse(await file.text())
+        const tasksArray = Array.isArray(parsed) ? parsed : isRecord(parsed) ? parsed.tasks : undefined
         if (!Array.isArray(tasksArray)) {
-          setImportResult({ success: false, message: 'Invalid format. Expected an array of tasks.' })
-          setTimeout(() => setImportResult(null), 3000)
+          showResult({ success: false, message: "Invalid format. Expected an array of tasks." })
           return
         }
 
         let imported = 0
-        for (const task of tasksArray) {
-          if (task.title) {
-            // Build task data, only including fields that actually exist
-            const taskData: Record<string, any> = { title: task.title }
-            if (task.detail || task.description) taskData.detail = task.detail || task.description
-            if (task.photo) taskData.photo = task.photo
-            if (task.alarm) taskData.alarm = task.alarm
-            if (task.repeats) taskData.repeats = task.repeats
-            if (task.dueDate) taskData.dueDate = task.dueDate
+        for (const candidate of tasksArray) {
+          if (!isRecord(candidate)) continue
+          const title = optionalString(candidate, "title")?.trim()
+          if (!title) continue
 
-            try {
-              await createCloudTask(user.uid, taskData as any)
-              imported++
-            } catch (taskError) {
-              console.error('Error importing task:', task.title, taskError)
-            }
+          const taskData: Parameters<typeof createCloudTask>[1] = {
+            title,
+            detail: optionalString(candidate, "detail") ?? optionalString(candidate, "description"),
+            photo: optionalString(candidate, "photo"),
+            alarm: optionalString(candidate, "alarm"),
+            repeats: optionalString(candidate, "repeats"),
+            dueDate: optionalString(candidate, "dueDate"),
+          }
+
+          try {
+            await createCloudTask(user.uid, taskData)
+            imported += 1
+          } catch (error) {
+            console.error("Error importing task:", title, error)
           }
         }
-        
-        setImportResult({ success: true, message: `Successfully imported ${imported} tasks.` })
+
+        showResult({ success: true, message: `Successfully imported ${imported} tasks.` })
         onDataImported()
       } catch (error) {
-        console.error('Import error:', error)
-        setImportResult({ success: false, message: 'Failed to read or parse file.' })
+        console.error("Import error:", error)
+        showResult({ success: false, message: "Failed to read or parse file." })
       }
-      
-      // Clear message after 3 seconds
-      setTimeout(() => setImportResult(null), 3000)
     }
-    
     input.click()
   }
 
   const handleExportCalendar = () => {
-    const tasksWithAlarms = tasks.filter(t => t.alarm && !t.completed)
-    
+    const tasksWithAlarms = tasks.filter((task) => task.alarm && !task.completed)
     if (tasksWithAlarms.length === 0) {
-      setImportResult({ success: false, message: 'No tasks with alarms to export.' })
-      setTimeout(() => setImportResult(null), 3000)
+      showResult({ success: false, message: "No tasks with alarms to export." })
       return
     }
-    
-    exportAllAlarmsToICS(tasksWithAlarms.map(t => ({
-      id: t.id,
-      title: t.title,
-      description: t.detail,
-      alarm: t.alarm!,
-      repeats: t.repeats,
-      dueDate: t.dueDate,
+
+    exportAllAlarmsToICS(tasksWithAlarms.map((task) => ({
+      id: task.id,
+      title: task.title,
+      description: task.detail,
+      alarm: task.alarm!,
+      repeats: task.repeats,
+      dueDate: task.dueDate,
     })))
-    
-    setImportResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
-    setTimeout(() => setImportResult(null), 3000)
+    showResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
   }
 
   const handleRequestNotifications = async () => {
     const granted = await requestWebNotificationPermission()
-    setNotificationStatus(granted ? 'granted' : 'denied')
+    setNotificationStatus(granted ? "granted" : "denied")
   }
 
+  const notificationCopy = notificationStatus === "granted"
+    ? "Enabled — reminders may appear while the app is open."
+    : notificationStatus === "denied"
+      ? "Blocked — enable notifications in the browser settings."
+      : notificationStatus === "not-supported"
+        ? "This browser does not support web notifications."
+        : notificationStatus === "checking"
+          ? "Checking browser support..."
+          : "Permission has not been requested yet."
+
   return (
-    <div className="h-screen flex flex-col bg-transparent relative">
-      {/* Header */}
-      <div className="flex items-center justify-between p-6 pb-4 animate-fade-in">
-        <button onClick={onOpenDrawer} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <Menu className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-        <h1 
-          className="text-sm font-bold tracking-[0.2em] text-[var(--metal-muted)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          SETTINGS
-        </h1>
-        <button onClick={onBack} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <ArrowLeft className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-      </div>
-
-      {/* Settings Container */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-md mx-auto space-y-4">
-
-          {/* Account Section */}
-          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up">
-            <h2 
-              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider flex items-center gap-2"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-            >
-              <User className="w-4 h-4" />
-              ACCOUNT
-            </h2>
-            
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[var(--ember)]/20 flex items-center justify-center">
-                  <span className="text-[var(--ember)] font-bold text-sm" style={{ fontFamily: 'var(--font-display)' }}>
-                    {user?.email?.charAt(0).toUpperCase() || '?'}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[var(--metal-bright)] truncate">{user?.email || 'Unknown'}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <Cloud className="w-3 h-3 text-[var(--forge-green)]" />
-                    <p className="text-xs text-[var(--forge-green)] font-light">Synced across devices</p>
-                  </div>
-                </div>
+    <section className="xp-screen xp-settings" aria-label="Settings">
+      <XpHeader title="Settings" onOpenDrawer={onOpenDrawer} onBack={onBack} />
+      <main className="xp-content">
+        <div className="xp-settings-sheet">
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title"><User /> Account</span>
+            <div className="xp-account-row">
+              <div className="xp-user-tile" aria-hidden="true">{user?.email?.charAt(0).toUpperCase() || "?"}</div>
+              <div className="xp-account-copy">
+                <strong>{user?.email || "Unknown"}</strong>
+                <span><Cloud /> Synced across devices</span>
               </div>
-              
-              <button
-                onClick={handleSignOut}
-                disabled={signingOut}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--forge-red)]/30 rounded-xl text-[var(--forge-red)] hover:bg-[var(--forge-red)]/10 disabled:opacity-50 transition-all duration-300 text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                {signingOut ? 'Signing out...' : 'Sign Out'}
-              </button>
+              <button type="button" className="xp-button xp-button-danger" onClick={handleSignOut} disabled={signingOut}><LogOut /> {signingOut ? "Signing out..." : "Sign Out"}</button>
             </div>
-          </div>
-          
-          {/* Notifications Section */}
-          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up stagger-1">
-            <h2 
-              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider flex items-center gap-2"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-            >
-              <Bell className="w-4 h-4" />
-              NOTIFICATIONS
-            </h2>
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--metal-bright)]">Web Notifications</p>
-                  <p className="text-xs text-[var(--metal-muted)] mt-1 font-light">
-                    {notificationStatus === 'granted' 
-                      ? 'Enabled - you will receive reminders'
-                      : notificationStatus === 'denied'
-                        ? 'Blocked - enable in browser settings'
-                        : notificationStatus === 'not-supported'
-                          ? 'Not supported in this browser'
-                          : 'Not enabled yet'}
-                  </p>
-                </div>
-                {isWebNotificationSupported() && notificationStatus !== 'granted' && (
-                  <button
-                    onClick={handleRequestNotifications}
-                    className="px-4 py-2 bg-[var(--ember)] text-[var(--obsidian)] rounded-lg text-sm font-medium hover:brightness-110 transition-all shadow-[0_0_10px_rgba(var(--ember-rgb),0.2)]"
-                  >
-                    Enable
-                  </button>
-                )}
-                {notificationStatus === 'granted' && (
-                  <div className="px-4 py-2 bg-[var(--forge-green)]/15 text-[var(--forge-green)] rounded-lg text-sm font-medium">
-                    Enabled
-                  </div>
-                )}
-              </div>
+          </section>
+
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title"><Bell /> Notifications</span>
+            <div className="xp-settings-row">
+              <div><strong>Web Notifications</strong><p>{notificationCopy}</p></div>
+              {notificationStatus !== "checking" && notificationStatus !== "not-supported" && notificationStatus !== "granted" && <button type="button" className="xp-button" onClick={handleRequestNotifications}>Enable</button>}
+              {notificationStatus === "granted" && <span className="xp-badge xp-badge-success">Enabled</span>}
             </div>
-          </div>
+          </section>
 
-          {/* Calendar Export Section */}
-          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up stagger-2">
-            <h2 
-              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider flex items-center gap-2"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-            >
-              <Calendar className="w-4 h-4" />
-              CALENDAR EXPORT
-            </h2>
-            
-            <p className="text-xs text-[var(--metal-muted)] mb-4 font-light">
-              Export your task alarms to a .ics calendar file. This is especially useful for iOS 
-              devices where PWA background notifications are limited.
-            </p>
-            
-            <button
-              onClick={handleExportCalendar}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-xl text-[var(--metal-bright)] hover:border-[var(--ember)] hover:shadow-[0_0_10px_rgba(var(--ember-rgb),0.1)] transition-all duration-300"
-            >
-              <Calendar className="w-4 h-4" />
-              Export Alarms to Calendar (.ics)
-            </button>
-          </div>
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title"><Calendar /> Calendar Export</span>
+            <p className="xp-settings-help">Export task alarms to an .ics file. This is useful on platforms where PWA background notifications are limited.</p>
+            <button type="button" className="xp-button xp-settings-wide-button" onClick={handleExportCalendar}><Calendar /> Export Alarms to Calendar (.ics)</button>
+          </section>
 
-          {/* Data Management Section */}
-          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up stagger-3">
-            <h2 
-              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider flex items-center gap-2"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-            >
-              <Shield className="w-4 h-4" />
-              DATA MANAGEMENT
-            </h2>
-            
-            <div className="space-y-3">
-              <button
-                onClick={handleExportData}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-xl text-[var(--metal-bright)] hover:border-[var(--ember)] hover:shadow-[0_0_10px_rgba(var(--ember-rgb),0.1)] transition-all duration-300"
-              >
-                <Download className="w-4 h-4" />
-                Export All Data (JSON)
-              </button>
-              
-              <button
-                onClick={handleImportData}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-xl text-[var(--metal-bright)] hover:border-[var(--ember)] hover:shadow-[0_0_10px_rgba(var(--ember-rgb),0.1)] transition-all duration-300"
-              >
-                <Upload className="w-4 h-4" />
-                Import Data (JSON)
-              </button>
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title"><Shield /> Data Management</span>
+            <div className="xp-settings-actions">
+              <button type="button" className="xp-button" onClick={handleExportData}><Download /> Export All Data (JSON)</button>
+              <button type="button" className="xp-button" onClick={handleImportData}><Upload /> Import Data (JSON)</button>
             </div>
-            
-            <p className="text-xs text-[var(--metal-muted)] mt-4 font-light">
-              Export creates a backup of all your tasks. Import will replace all existing data.
-            </p>
-          </div>
+            <p className="xp-settings-help">Export creates a backup of all tasks. Import appends valid tasks from a backup to the current account.</p>
+          </section>
 
-          {/* Import/Export Result Message */}
-          {importResult && (
-            <div className={`p-4 rounded-xl text-sm ${
-              importResult.success 
-                ? 'bg-[var(--forge-green)]/15 text-[var(--forge-green)] border border-[var(--forge-green)]/30' 
-                : 'bg-[var(--forge-red)]/15 text-[var(--forge-red)] border border-[var(--forge-red)]/30'
-            }`}>
-              {importResult.message}
-            </div>
-          )}
+          {importResult && <div className={`xp-alert ${importResult.success ? "xp-alert-success" : "xp-alert-error"}`} role="status">{importResult.message}</div>}
 
-          {/* App Info */}
-          <div className="border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] animate-fade-in-up stagger-4">
-            <h2 
-              className="text-sm text-[var(--metal-muted)] mb-4 tracking-wider"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}
-            >
-              ABOUT
-            </h2>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-[var(--metal-muted)] font-light">Version</span>
-                <span className="text-[var(--metal-bright)]">2.0.0 (Cloud Sync)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--metal-muted)] font-light">Tasks</span>
-                <span className="text-[var(--ember)]">{tasks.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--metal-muted)] font-light">Storage</span>
-                <span className="text-[var(--metal-bright)]">Cloud (Firebase)</span>
-              </div>
-            </div>
-          </div>
-
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title">About</span>
+            <dl className="xp-settings-about">
+              <div><dt>Version</dt><dd>2.0.0 (Cloud Sync)</dd></div>
+              <div><dt>Tasks</dt><dd>{tasks.length}</dd></div>
+              <div><dt>Storage</dt><dd>Cloud (Firebase)</dd></div>
+            </dl>
+          </section>
         </div>
-      </div>
-    </div>
+      </main>
+      <XpStatusBar><span className="flex-1">Preferences</span><span>{tasks.length} tasks</span></XpStatusBar>
+    </section>
   )
 }

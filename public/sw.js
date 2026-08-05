@@ -1,4 +1,4 @@
-const CACHE_NAME = 'task-manager-v3';
+const CACHE_NAME = 'task-manager-xp-v4';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -8,7 +8,7 @@ const STATIC_ASSETS = [
 ];
 
 // Dynamic cache for Next.js chunks and other assets
-const DYNAMIC_CACHE = 'task-manager-dynamic-v3';
+const DYNAMIC_CACHE = 'task-manager-dynamic-xp-v4';
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -49,6 +49,11 @@ self.addEventListener('fetch', (event) => {
 
   // Skip chrome-extension and other non-http(s) requests
   if (!url.protocol.startsWith('http')) {
+    return;
+  }
+
+  // Never cache authenticated or third-party responses (for example Firebase APIs).
+  if (url.origin !== self.location.origin) {
     return;
   }
 

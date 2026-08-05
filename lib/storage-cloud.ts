@@ -5,16 +5,13 @@
 import {
   collection,
   doc,
-  addDoc,
   setDoc,
   updateDoc,
   deleteDoc,
   getDocs,
   onSnapshot,
-  query,
-  orderBy,
   writeBatch,
-  serverTimestamp,
+  deleteField,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getDbInstance } from './firebase';
@@ -36,24 +33,41 @@ function generateId(): string {
 }
 
 // Firestore doesn't allow undefined values — strip them before writing
-function stripUndefined(obj: Record<string, any>): Record<string, any> {
+function stripUndefined<T extends object>(obj: T): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined)
+    Object.entries(obj).filter(([, value]) => value !== undefined)
   );
 }
+
+function sortTasks(tasks: TaskRecord[]): TaskRecord[] {
+  return tasks.sort((a, b) => {
+    const aCreatedAt = Date.parse(a.createdAt);
+    const bCreatedAt = Date.parse(b.createdAt);
+    const aOrder = a.sortOrder ?? (Number.isNaN(aCreatedAt) ? 0 : -aCreatedAt);
+    const bOrder = b.sortOrder ?? (Number.isNaN(bCreatedAt) ? 0 : -bCreatedAt);
+    return aOrder - bOrder;
+  });
+}
+
+export type CloudTaskUpdates = Partial<Omit<TaskRecord, 'detail' | 'photo' | 'alarm' | 'repeats' | 'dueDate'>> & {
+  detail?: string | null;
+  photo?: string | null;
+  alarm?: string | null;
+  repeats?: string | null;
+  dueDate?: string | null;
+};
 
 // Get all tasks from Firestore (one-time fetch)
 export async function getCloudTasks(userId: string): Promise<TaskRecord[]> {
   try {
-    const q = query(tasksCollection(userId), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => ({
+    const snapshot = await getDocs(tasksCollection(userId));
+    return sortTasks(snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
-    })) as TaskRecord[];
+    })) as TaskRecord[]);
   } catch (error) {
     console.error('Error getting cloud tasks:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -61,21 +75,21 @@ export async function getCloudTasks(userId: string): Promise<TaskRecord[]> {
 // Returns an unsubscribe function
 export function subscribeToTasks(
   userId: string,
-  callback: (tasks: TaskRecord[]) => void
+  callback: (tasks: TaskRecord[]) => void,
+  onError?: (error: Error) => void,
 ): Unsubscribe {
-  const q = query(tasksCollection(userId), orderBy('createdAt', 'desc'));
-
   return onSnapshot(
-    q,
+    tasksCollection(userId),
     (snapshot) => {
-      const tasks = snapshot.docs.map((doc) => ({
+      const tasks = sortTasks(snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
-      })) as TaskRecord[];
+      })) as TaskRecord[]);
       callback(tasks);
     },
     (error) => {
       console.error('Error listening to tasks:', error);
+      onError?.(error);
     }
   );
 }
@@ -106,6 +120,7 @@ export async function createCloudTask(
     alarm: data.alarm,
     repeats: data.repeats,
     dueDate: data.dueDate,
+    sortOrder: -Date.now(),
   };
 
   await setDoc(taskDoc(userId, taskId), stripUndefined(newTask));
@@ -116,11 +131,14 @@ export async function createCloudTask(
 export async function updateCloudTask(
   userId: string,
   taskId: string,
-  updates: Partial<TaskRecord>
+  updates: CloudTaskUpdates
 ): Promise<void> {
   try {
+    const firestoreUpdates = Object.fromEntries(
+      Object.entries(updates).map(([key, value]) => [key, value === null ? deleteField() : value])
+    );
     await updateDoc(taskDoc(userId, taskId), stripUndefined({
-      ...updates,
+      ...firestoreUpdates,
       updatedAt: new Date().toISOString(),
     }));
   } catch (error) {
@@ -153,25 +171,22 @@ export async function toggleCloudTaskComplete(
   });
 }
 
-// Save all tasks (bulk replace) — used for reordering
+// Persist task order without deleting documents or replacing concurrent changes.
 export async function saveCloudTasks(
   userId: string,
   tasks: TaskRecord[]
 ): Promise<void> {
   try {
-    const batch = writeBatch(getDbInstance());
-
-    // Delete all existing tasks
-    const existing = await getDocs(tasksCollection(userId));
-    existing.docs.forEach((doc) => batch.delete(doc.ref));
-
-    // Add all tasks with their IDs
-    tasks.forEach((task) => {
-      const ref = taskDoc(userId, task.id);
-      batch.set(ref, stripUndefined(task) as TaskRecord);
-    });
-
-    await batch.commit();
+    const chunkSize = 450;
+    for (let start = 0; start < tasks.length; start += chunkSize) {
+      const batch = writeBatch(getDbInstance());
+      tasks.slice(start, start + chunkSize).forEach((task, index) => {
+        const sortOrder = start + index;
+        const ref = taskDoc(userId, task.id);
+        batch.set(ref, stripUndefined({ ...task, sortOrder }), { merge: true });
+      });
+      await batch.commit();
+    }
   } catch (error) {
     console.error('Error saving cloud tasks:', error);
   }
@@ -194,9 +209,9 @@ export async function migrateLocalToCloud(
 
     // Upload all local tasks to Firestore
     const batch = writeBatch(getDbInstance());
-    localTasks.forEach((task) => {
+    localTasks.forEach((task, sortOrder) => {
       const ref = taskDoc(userId, task.id);
-      batch.set(ref, stripUndefined(task) as TaskRecord);
+      batch.set(ref, stripUndefined({ ...task, sortOrder }));
     });
     await batch.commit();
 

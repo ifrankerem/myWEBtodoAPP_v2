@@ -2,6 +2,7 @@
 // Works alongside Capacitor notifications for web-only scenarios
 
 import { Capacitor } from '@capacitor/core';
+import { parseAlarmTime, parseTaskDate } from './task-dates';
 
 // Store for active foreground reminders
 const activeReminders = new Map<string, number>();
@@ -34,21 +35,6 @@ export function showWebNotification(title: string, options?: NotificationOptions
   });
 }
 
-// Parse alarm time string (24-hour format like "14:30" or "09:15")
-function parseAlarmTime(alarmString: string): { hour: number; minute: number } | null {
-  if (!alarmString) return null;
-  
-  const match = alarmString.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  
-  const hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
-  
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  
-  return { hour, minute };
-}
-
 // Day name mapping
 const dayNameToIndex: Record<string, number> = {
   'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6,
@@ -75,7 +61,7 @@ function shouldTriggerToday(task: {
   
   // If has due date, check if it's today
   if (task.dueDate) {
-    const dueDate = new Date(task.dueDate);
+    const dueDate = parseTaskDate(task.dueDate);
     return dueDate.toDateString() === today.toDateString();
   }
   
@@ -133,7 +119,7 @@ export function startForegroundReminder(task: {
     playAlarmSound();
     
     // Show notification if we have permission
-    if (Notification.permission === 'granted') {
+    if (isWebNotificationSupported() && Notification.permission === 'granted') {
       showWebNotification('🔔 ALARM', {
         body: task.title,
         tag: task.id,
@@ -170,7 +156,10 @@ export function stopAllForegroundReminders(): void {
 // Play alarm sound
 async function playAlarmSound(): Promise<void> {
   try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
+    const AudioContextConstructor = window.AudioContext || audioWindow.webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const audioContext = new AudioContextConstructor();
     
     // Resume the audio context (required by autoplay policy)
     if (audioContext.state === 'suspended') {
@@ -209,48 +198,27 @@ async function playAlarmSound(): Promise<void> {
 
 // Show in-app alert (creates a temporary popup)
 function showInAppAlert(message: string): void {
-  // Create alert element
   const alert = document.createElement('div');
-  alert.style.cssText = `
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(135deg, #ff3b30, #ff6b6b);
-    color: white;
-    padding: 16px 24px;
-    border-radius: 12px;
-    font-weight: 600;
-    z-index: 10000;
-    box-shadow: 0 4px 20px rgba(255, 59, 48, 0.4);
-    animation: slideDown 0.3s ease-out;
-    max-width: 90%;
-    text-align: center;
-  `;
-  
-  alert.innerHTML = `
-    <div style="font-size: 20px; margin-bottom: 4px;">🔔 ALARM</div>
-    <div style="font-size: 14px; opacity: 0.9;">${message}</div>
-  `;
-  
-  // Add animation keyframes
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideDown {
-      from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
-      to { transform: translateX(-50%) translateY(0); opacity: 1; }
-    }
-  `;
-  document.head.appendChild(style);
-  
+  alert.className = 'xp-alarm-toast';
+  alert.setAttribute('role', 'alert');
+  alert.setAttribute('aria-live', 'assertive');
+
+  const title = document.createElement('div');
+  title.className = 'xp-alarm-toast-title';
+  title.textContent = 'Alarm';
+
+  const body = document.createElement('div');
+  body.className = 'xp-alarm-toast-body';
+  body.textContent = message;
+
+  alert.append(title, body);
   document.body.appendChild(alert);
   
   // Remove after 5 seconds
   setTimeout(() => {
-    alert.style.animation = 'slideDown 0.3s ease-out reverse';
+    alert.classList.add('xp-alarm-toast-closing');
     setTimeout(() => {
       alert.remove();
-      style.remove();
     }, 300);
   }, 5000);
 }
@@ -266,9 +234,6 @@ export function initializeForegroundReminders(tasks: Array<{
 }>): void {
   // Only run on web platforms (not native Capacitor)
   if (Capacitor.isNativePlatform()) return;
-  
-  // Request notification permission
-  requestWebNotificationPermission();
   
   // Stop any existing reminders
   stopAllForegroundReminders();

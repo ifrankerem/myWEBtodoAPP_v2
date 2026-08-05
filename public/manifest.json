@@ -1,14 +1,14 @@
 {
   "name": "Task Manager",
   "short_name": "Tasks",
-  "description": "A dark, minimalist task manager PWA",
+  "description": "A Windows XP-inspired task manager with cloud sync and offline support",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
-  "background_color": "#0B0B0B",
-  "theme_color": "#0B0B0B",
+  "background_color": "#3A6EA5",
+  "theme_color": "#245EDB",
   "orientation": "portrait-primary",
   "icons": [
     {

@@ -2,9 +2,10 @@
 
 import type React from "react"
 import { useState } from "react"
-import { Menu, ImageIcon, X, Check } from "lucide-react"
+import { Check, ImageIcon, X } from "lucide-react"
 import type { Task } from "@/app/page"
 import { compressImage } from "@/lib/storage-idb"
+import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 
 interface AddTaskScreenProps {
   onSave: (task: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => void
@@ -24,132 +25,111 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialD
   const [selectedDays, setSelectedDays] = useState<string[]>([])
   const [dueDate, setDueDate] = useState(initialDueDate || "")
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
   const toggleDay = (day: string) => {
-    setSelectedDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]))
+    setSelectedDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])
   }
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      setPhotoFile(file)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        const raw = reader.result as string
-        compressImage(raw).then((compressed) => {
-          setPhotoPreview(compressed)
-        }).catch(() => {
-          setPhotoPreview(raw)
-        })
-      }
-      reader.readAsDataURL(file)
+
+  const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const raw = reader.result as string
+      compressImage(raw).then(setPhotoPreview).catch(() => setPhotoPreview(raw))
     }
+    reader.readAsDataURL(file)
   }
+
   const handleSave = () => {
+    const normalizedTitle = title.trim() || "Untitled Task"
     const task: Omit<Task, "id" | "createdDate" | "lastEditedDate"> = {
-      name: title || "Untitled Task", title: title || "Untitled Task",
-      type: photoFile ? "picture" : "text", photo: photoPreview || undefined,
-      detail: detail || undefined, alarm: alarmEnabled ? alarmTime : undefined,
+      name: normalizedTitle,
+      title: normalizedTitle,
+      type: photoFile ? "picture" : "text",
+      photo: photoPreview || undefined,
+      detail: detail || undefined,
+      alarm: alarmEnabled ? alarmTime : undefined,
       repeats: isRepetitive && selectedDays.length > 0 ? selectedDays.join(", ") : undefined,
       dueDate: dueDate || undefined,
     }
     onSave(task, photoFile || undefined)
   }
 
-  // Common style shortcuts
-  const obs = "var(--obsidian)"
-  const obsB = "var(--obsidian-border)"
-  const emb = "var(--ember)"
-  const embR = "var(--ember-rgb)"
-  const mtB = "var(--metal-bright)"
-  const mtM = "var(--metal-muted)"
-
   return (
-    <div className="h-screen flex flex-col bg-transparent relative">
-      <div className="flex items-center justify-between p-6 pb-4 animate-fade-in">
-        <button onClick={onOpenDrawer} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <Menu className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-        <h1 className="text-sm font-bold tracking-[0.2em] text-[var(--metal-muted)]" style={{ fontFamily: 'var(--font-display)' }}>ADD TASK</h1>
-        <div className="w-10" />
-      </div>
-      <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-md mx-auto border border-[var(--obsidian-border)] rounded-2xl p-6 bg-[var(--obsidian-1)] space-y-6 animate-scale-in stagger-1">
-          <div>
-            <label className="block text-sm text-[var(--metal-bright)] mb-3 font-light">Title:</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Enter task title"
-              className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300" />
-          </div>
-          <div className="border-t border-[var(--obsidian-border)]" />
-          <div>
-            <label className="block text-sm text-[var(--metal-bright)] mb-3 font-light">Details (optional):</label>
-            <textarea value={detail} onChange={(e) => setDetail(e.target.value)} placeholder="Enter task details" rows={4}
-              className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] placeholder:text-[var(--metal-muted)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 resize-none" />
-          </div>
-          <div className="border-t border-[var(--obsidian-border)]" />
-          <div>
-            <label className="block text-sm text-[var(--metal-bright)] mb-3 font-light">Due Date (optional):</label>
-            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-              className="w-full px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]" />
-          </div>
-          <div className="border-t border-[var(--obsidian-border)]" />
-          <div>
-            <label className="block text-sm text-[var(--metal-bright)] mb-3 font-light">Photo (optional):</label>
-            <div className="flex gap-3">
-              <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] hover:border-[var(--ember)] transition-all duration-300 cursor-pointer">
-                Add Photo
+    <section className="xp-screen" aria-label="Add Task">
+      <XpHeader title="New Task" onOpenDrawer={onOpenDrawer} onBack={onCancel} />
+
+      <main className="xp-content">
+        <div className="xp-property-sheet">
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title">General</span>
+            <div className="xp-form-grid">
+              <div className="xp-field">
+                <label htmlFor="task-title">Title</label>
+                <input id="task-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Enter task title" autoFocus />
+              </div>
+              <div className="xp-field">
+                <label htmlFor="task-details">Details (optional)</label>
+                <textarea id="task-details" value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Enter task details" rows={5} />
+              </div>
+              <div className="xp-field">
+                <label htmlFor="task-due-date">Due date (optional)</label>
+                <input id="task-due-date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+              </div>
+            </div>
+          </section>
+
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title">Picture</span>
+            <div className="xp-photo-row">
+              <label className="xp-button xp-file-button">
+                <ImageIcon /> Browse...
                 <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
               </label>
-              <div className="w-14 h-14 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg flex items-center justify-center overflow-hidden">
-                {photoPreview ? (<img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />) : (<ImageIcon className="w-6 h-6 text-[var(--metal-muted)]" />)}
+              <div className="xp-photo-preview">
+                {photoPreview ? <img src={photoPreview} alt="Task preview" /> : <ImageIcon aria-label="No picture selected" />}
               </div>
+              {photoPreview && (
+                <button type="button" className="xp-button xp-button-danger" onClick={() => { setPhotoFile(null); setPhotoPreview(null) }}>
+                  <X /> Remove
+                </button>
+              )}
             </div>
-            {photoPreview && (
-              <button onClick={() => { setPhotoFile(null); setPhotoPreview(null) }} className="mt-2 text-xs text-[var(--forge-red)] hover:brightness-110 flex items-center gap-1">
-                <X className="w-3 h-3" />Remove photo
-              </button>
-            )}
-          </div>
-          <div className="border-t border-[var(--obsidian-border)]" />
-          <div>
-            <label className="block text-sm text-[var(--metal-bright)] mb-3 font-light">Alarm (optional):</label>
-            <div className="flex items-center gap-3">
-              <input type="time" value={alarmTime} onChange={(e) => setAlarmTime(e.target.value)}
-                className="flex-1 px-4 py-3 bg-[var(--obsidian)] border border-[var(--obsidian-border)] rounded-lg text-[var(--metal-bright)] focus:border-[var(--ember)] focus:shadow-[0_0_10px_rgba(var(--ember-rgb),0.15)] focus:outline-none transition-all duration-300 [color-scheme:dark]" />
-              <button onClick={() => setAlarmEnabled(!alarmEnabled)}
-                className={`px-6 py-2 rounded-full border transition-all duration-300 ${alarmEnabled ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_12px_rgba(var(--ember-rgb),0.3)]" : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"}`}>
-                {alarmEnabled ? "ON" : "OFF"}
-              </button>
-            </div>
-          </div>
-          <div className="border-t border-[var(--obsidian-border)]" />
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="text-sm text-[var(--metal-bright)] font-light">Is it repetitive? (optional)</label>
-              <button onClick={() => setIsRepetitive(!isRepetitive)}
-                className={`px-6 py-2 rounded-full border transition-all duration-300 ${isRepetitive ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_12px_rgba(var(--ember-rgb),0.3)]" : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)]"}`}>
-                {isRepetitive ? "ON" : "OFF"}
-              </button>
-            </div>
-            {isRepetitive && (
-              <div className="flex gap-2 flex-wrap mt-4">
-                {days.map((day) => (
-                  <button key={day} onClick={() => toggleDay(day)}
-                    className={`px-4 py-2 rounded-lg border text-sm transition-all duration-300 ${selectedDays.includes(day) ? "bg-[var(--ember)] text-[var(--obsidian)] border-[var(--ember)] shadow-[0_0_8px_rgba(var(--ember-rgb),0.2)]" : "bg-[var(--obsidian)] text-[var(--metal-muted)] border-[var(--obsidian-border)] hover:border-[var(--ember)]"}`}>
-                    {day}
-                  </button>
-                ))}
+          </section>
+
+          <section className="xp-groupbox">
+            <span className="xp-groupbox-title">Reminder</span>
+            <div className="xp-form-grid">
+              <div className="xp-option-row">
+                <label className="xp-checkbox-label">
+                  <input type="checkbox" checked={alarmEnabled} onChange={(event) => setAlarmEnabled(event.target.checked)} />
+                  Enable alarm
+                </label>
+                <input aria-label="Alarm time" type="time" value={alarmTime} onChange={(event) => setAlarmTime(event.target.value)} disabled={!alarmEnabled} />
               </div>
-            )}
-          </div>
+              <label className="xp-checkbox-label">
+                <input type="checkbox" checked={isRepetitive} onChange={(event) => setIsRepetitive(event.target.checked)} />
+                Repeat on selected days
+              </label>
+              {isRepetitive && (
+                <div className="xp-day-picker" aria-label="Repeat days">
+                  {days.map((day) => (
+                    <button key={day} type="button" className="xp-button" aria-pressed={selectedDays.includes(day)} onClick={() => toggleDay(day)}>{day}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
         </div>
+      </main>
+
+      <div className="xp-actionbar">
+        <button type="button" className="xp-button" onClick={onCancel}><X /> Cancel</button>
+        <button type="button" className="xp-button xp-primary-button" onClick={handleSave}><Check /> Save Task</button>
       </div>
-      <div className="fixed bottom-8 right-6 flex flex-col gap-3 z-30">
-        <button onClick={onCancel} className="w-14 h-14 rounded-full bg-[var(--obsidian-2)] text-[var(--metal-muted)] flex items-center justify-center shadow-lg hover:bg-[var(--obsidian-border)] active:scale-95 transition-all animate-fade-in-up stagger-1">
-          <X className="w-6 h-6" />
-        </button>
-        <button onClick={handleSave} className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)] animate-fade-in-up stagger-2">
-          <Check className="w-7 h-7" strokeWidth={2.5} />
-        </button>
-      </div>
-    </div>
+      <XpStatusBar><span className="flex-1">Ready</span><span>{photoPreview ? "1 picture selected" : "No picture"}</span></XpStatusBar>
+    </section>
   )
 }
