@@ -452,6 +452,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  overflow: hidden;
 }
 
 .xp-task-item-grid .xp-task-thumbnail,
@@ -502,6 +503,26 @@
 .xp-task-copy {
   min-width: 0;
   display: block;
+}
+
+.xp-task-item-grid .xp-task-copy {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
+}
+
+.xp-task-item-grid .xp-task-copy strong {
+  min-height: 2.5em;
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .xp-task-copy strong,

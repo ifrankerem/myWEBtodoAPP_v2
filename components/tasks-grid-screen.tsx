@@ -100,7 +100,7 @@ function SortableTask({ task, eraseMode, canReorder, view, onTaskClick, onDelete
       >
         {thumbnail}
         <span className="xp-task-copy">
-          <strong>{task.title}</strong>
+          <strong title={task.title}>{task.title}</strong>
           {view === "list" && (
             <small>{task.detail || task.dueDate || (task.completed ? "Completed task" : "Task")}</small>
           )}
