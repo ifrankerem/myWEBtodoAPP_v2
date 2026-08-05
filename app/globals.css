@@ -1601,6 +1601,65 @@
   .xp-content {
     padding: 6px;
   }
+
+  .xp-calendar-main {
+    padding-right: 4px;
+    padding-bottom: 6px;
+    padding-left: 4px;
+  }
+
+  .xp-schedule-scroll {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .xp-schedule-table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .xp-schedule-weekdays span {
+    min-width: 0;
+    padding: 4px 0;
+    overflow: hidden;
+    font-size: 9px;
+  }
+
+  .xp-schedule-week {
+    min-height: 96px;
+  }
+
+  .xp-schedule-day {
+    min-width: 0;
+    padding: 2px 1px;
+    overflow: hidden;
+  }
+
+  .xp-schedule-date {
+    width: 100%;
+    max-width: 28px;
+    height: 24px;
+    margin-bottom: 2px;
+    font-size: 11px;
+  }
+
+  .xp-schedule-tasks {
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .xp-schedule-task {
+    width: 100%;
+    padding: 2px 1px;
+    font-size: 8px;
+  }
+
+  .xp-schedule-tasks small {
+    overflow: hidden;
+    font-size: 8px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
