@@ -2,7 +2,8 @@
 // Works on real Android/iOS devices
 
 import { Capacitor } from '@capacitor/core';
-import { LocalNotifications, Channel } from '@capacitor/local-notifications';
+import { LocalNotifications, type Channel, type LocalNotificationSchema } from '@capacitor/local-notifications';
+import { parseAlarmTime, parseTaskDate } from './task-dates';
 
 // Day name to weekday number mapping (Sunday = 1, Monday = 2, etc. for LocalNotifications)
 const dayToWeekday: Record<string, number> = {
@@ -17,24 +18,6 @@ const dayToWeekday: Record<string, number> = {
 
 // Alarm channel ID
 const ALARM_CHANNEL_ID = 'task-alarms';
-
-// Parse alarm time string (24-hour format like "14:30" or "09:15")
-function parseAlarmTime(alarmString: string): { hour: number; minute: number } | null {
-  if (!alarmString) return null;
-  
-  // Handle 24-hour format: "HH:MM"
-  const match = alarmString.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  
-  const hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
-  
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return null;
-  }
-  
-  return { hour, minute };
-}
 
 // Generate a unique notification ID from task ID
 function generateNotificationId(taskId: string, daySuffix?: string): number {
@@ -104,6 +87,7 @@ export async function scheduleTaskNotification(task: {
   alarm?: string;
   repeats?: string;
   detail?: string;
+  dueDate?: string;
 }): Promise<void> {
   if (!Capacitor.isNativePlatform()) {
     console.log('Skipping notification scheduling on web');
@@ -130,7 +114,7 @@ export async function scheduleTaskNotification(task: {
   // Cancel any existing notifications for this task first
   await cancelTaskNotification(task.id);
   
-  const notifications: any[] = [];
+  const notifications: LocalNotificationSchema[] = [];
   
   if (task.repeats) {
     // Repeating alarm - schedule for each selected day
@@ -161,9 +145,15 @@ export async function scheduleTaskNotification(task: {
       });
     }
   } else {
-    // One-time alarm - schedule for today at the specified time
+    // One-time alarm - use the due date when provided, otherwise today.
     const now = new Date();
-    const scheduleDate = new Date();
+    const scheduleDate = task.dueDate
+      ? parseTaskDate(task.dueDate)
+      : new Date();
+    if (Number.isNaN(scheduleDate.getTime())) {
+      console.error('Invalid due date:', task.dueDate);
+      return;
+    }
     scheduleDate.setHours(time.hour, time.minute, 0, 0);
     
     // Only schedule if the time hasn't passed yet today
@@ -234,6 +224,7 @@ export async function initializeNotifications(tasks: Array<{
   title: string;
   alarm?: string;
   repeats?: string;
+  dueDate?: string;
   completed?: boolean;
 }>): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;

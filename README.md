@@ -1,6 +1,6 @@
 # 📋 Task Manager PWA
 
-A **dark, minimalist task manager** built as a Progressive Web App (PWA) with offline-first capabilities. Features a sleek dark UI, drag-and-drop task organization, smart alarms with repeating schedules, photo attachments, calendar integration, and full offline support.
+A **Windows XP-inspired task manager** built as a Progressive Web App (PWA). It combines light/dark XP themes, Firebase account sync, drag-and-drop organization, repeating alarms, photo attachments, calendar integration, and offline-capable caching.
 
 ![Task Manager](public/icons/icon-512.png)
 
@@ -10,7 +10,7 @@ A **dark, minimalist task manager** built as a Progressive Web App (PWA) with of
 
 ### Core Functionality
 - **Create & Manage Tasks** – Add tasks with titles, detailed descriptions, and photo attachments
-- **Photo Attachments** – Attach images to tasks, stored locally as Base64
+- **Photo Attachments** – Attach compressed Base64 images to cloud-synced tasks
 - **Complete & Archive** – Mark tasks complete with visual distinction between active and completed views
 - **Drag & Drop Reordering** – Reorganize tasks with intuitive drag-and-drop powered by `@dnd-kit`
 
@@ -29,7 +29,8 @@ A **dark, minimalist task manager** built as a Progressive Web App (PWA) with of
 - **Sliding Drawer** – Smooth navigation drawer for screen switching
 
 ### Offline-First Architecture
-- **IndexedDB Storage** – All data persisted locally using Dexie.js
+- **Firebase Storage Layer** – Per-user task documents synchronize in real time through Firestore
+- **IndexedDB Migration** – Existing local Dexie data migrates to Firestore on first sign-in
 - **Service Worker** – Full offline capability with custom service worker
 - **Automatic Migration** – Legacy localStorage data automatically migrates to IndexedDB
 - **Data Export/Import** – Backup and restore all tasks as JSON
@@ -46,13 +47,13 @@ A **dark, minimalist task manager** built as a Progressive Web App (PWA) with of
 
 | Category | Technology |
 |----------|------------|
-| **Framework** | Next.js 16 (App Router) |
+| **Framework** | Next.js 15 (App Router) |
 | **Language** | TypeScript |
 | **UI Library** | React 19 |
 | **Styling** | Tailwind CSS v4 |
 | **UI Components** | Radix UI Primitives |
 | **Drag & Drop** | @dnd-kit |
-| **Storage** | IndexedDB via Dexie.js |
+| **Storage** | Firebase Firestore with Dexie migration support |
 | **Notifications** | Capacitor Local Notifications |
 | **Date Handling** | date-fns |
 | **Toasts** | Sonner |
@@ -188,14 +189,14 @@ This project uses **Capacitor** for native Android/iOS builds.
 
 ## 🎨 Design Philosophy
 
-### Dark Minimalist UI
-- Background: `#0B0B0B` (near-black)
-- Accent: Subtle green highlights for completed states
-- Typography: Clean, readable sans-serif fonts
-- Motion: Smooth 200ms transitions throughout
+### Windows XP UI
+- Classic raised and inset controls with a blue XP title bar
+- System-style Tahoma typography and compact property sheets
+- User-selectable light and dark themes
+- Grid and list task views with persistent preferences
 
 ### Offline-First
-All data is stored locally in IndexedDB. No server required, no data leaves your device.
+Signed-in task data is stored in Firebase Firestore and synchronized across the user's devices. The service worker caches application assets for offline loading, while Firestore queues supported offline writes.
 
 ### Mobile-Native Feel
 - Hardware back button support
@@ -231,9 +232,9 @@ Settings → Export to Calendar → Downloads `.ics` file with all alarms
 
 ## 🔒 Privacy
 
-- **100% Local Storage** – All data stays on your device
-- **No Analytics** – No tracking or data collection
-- **No Server** – Works entirely offline
+- **Account-scoped cloud data** – Each user's tasks are stored under their Firebase user ID
+- **Firebase authentication** – Account access and synchronization require Firebase services
+- **Vercel Analytics** – The web build includes Vercel's analytics component
 - **Export Anytime** – Full data portability via JSON export
 
 ---
@@ -246,6 +247,7 @@ Settings → Export to Calendar → Downloads `.ics` file with all alarms
 | `npm run build` | Build for production |
 | `npm start` | Start production server |
 | `npm run lint` | Run ESLint |
+| `npm test` | Run Vitest regression tests |
 
 ---
 

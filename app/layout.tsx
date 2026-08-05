@@ -1,33 +1,19 @@
 import type { Metadata, Viewport } from 'next'
-import { DM_Sans, Outfit } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { AuthProvider } from '@/lib/auth-context'
+import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-body-family",
-  weight: ["200", "300", "400", "500"],
-});
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-display-family",
-  weight: ["300", "500", "700"],
-});
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  themeColor: '#0b0d10',
+  themeColor: '#245edb',
 }
 
 
 export const metadata: Metadata = {
   title: 'Task Manager',
-  description: 'A dark, minimalist task manager PWA',
+  description: 'A Windows XP-inspired task manager PWA',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -54,7 +40,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* PWA Meta Tags */}
         <meta name="mobile-web-app-capable" content="yes" />
@@ -84,10 +70,12 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${dmSans.variable} ${outfit.variable} font-sans antialiased`}>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+      <body className="xp-app">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>

@@ -8,6 +8,7 @@ import AddTaskScreen from "@/components/add-task-screen"
 import SlidingDrawer from "@/components/sliding-drawer"
 import SettingsScreen from "@/components/settings-screen"
 import LoginScreen from "@/components/login-screen"
+import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 import { useAuth } from "@/lib/auth-context"
 import { 
   getTasks as getLocalTasks, 
@@ -22,6 +23,7 @@ import {
   toggleCloudTaskComplete,
   saveCloudTasks,
   migrateLocalToCloud,
+  type CloudTaskUpdates,
 } from "@/lib/storage-cloud"
 import {
   initializeNotifications,
@@ -36,6 +38,7 @@ import {
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
+import { parseTaskDate } from '@/lib/task-dates'
 
 export type Task = {
   id: string
@@ -53,6 +56,22 @@ export type Task = {
 }
 
 export type Screen = "tasks" | "calendar" | "detail" | "add" | "completed" | "settings"
+
+function LoadingScreen({ label }: { label: string }) {
+  return (
+    <section className="xp-screen" aria-live="polite" aria-busy="true">
+      <XpHeader title="Starting" />
+      <main className="xp-content grid place-items-center">
+        <div className="xp-loading-dialog">
+          <strong>Task Manager</strong>
+          <p>{label}...</p>
+          <div className="xp-progress" aria-hidden="true"><span /></div>
+        </div>
+      </main>
+      <XpStatusBar><span className="flex-1">Please wait</span></XpStatusBar>
+    </section>
+  )
+}
 
 // Transform stored task to frontend Task format
 function storedTaskToTask(stored: StoredTask): Task {
@@ -80,9 +99,10 @@ export default function Page() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
-  const [migrationDone, setMigrationDone] = useState(false)
   const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
+  const [returnScreen, setReturnScreen] = useState<Screen>("tasks")
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const migrationDoneRef = useRef(false)
 
   // Subscribe to cloud tasks when user is signed in
   useEffect(() => {
@@ -103,7 +123,7 @@ export default function Page() {
       if (!user) return
 
       // One-time migration from IndexedDB to Firestore
-      if (!migrationDone) {
+      if (!migrationDoneRef.current) {
         try {
           const localTasks = await getLocalTasks()
           if (localTasks.length > 0) {
@@ -115,7 +135,7 @@ export default function Page() {
         } catch (err) {
           console.error('Migration error:', err)
         }
-        setMigrationDone(true)
+        migrationDoneRef.current = true
       }
 
       // Subscribe to real-time cloud updates
@@ -130,11 +150,15 @@ export default function Page() {
           title: t.title,
           alarm: t.alarm,
           repeats: t.repeats,
+          dueDate: t.dueDate,
           completed: t.completed,
         }))
         
         initializeNotifications(taskData)
         initializeForegroundReminders(taskData)
+      }, () => {
+        // Avoid trapping the user on the loading screen when Firestore is unavailable.
+        setLoading(false)
       })
 
       unsubscribeRef.current = unsubscribe
@@ -167,11 +191,11 @@ export default function Page() {
 
       switch (currentScreen) {
         case 'detail':
-          setCurrentScreen(selectedTask?.completed ? 'completed' : 'tasks');
+          setCurrentScreen(returnScreen);
           break;
         case 'add':
         case 'settings':
-          setCurrentScreen('tasks');
+          setCurrentScreen(returnScreen);
           break;
         case 'calendar':
         case 'completed':
@@ -188,14 +212,16 @@ export default function Page() {
     return () => {
       listener.then(l => l.remove());
     };
-  }, [currentScreen, drawerOpen, selectedTask]);
+  }, [currentScreen, drawerOpen, returnScreen]);
 
   const handleTaskClick = (task: Task) => {
+    setReturnScreen(currentScreen)
     setSelectedTask(task)
     setCurrentScreen("detail")
   }
 
   const handleNavigate = (screen: Screen) => {
+    if (screen === "settings") setReturnScreen(currentScreen)
     setCurrentScreen(screen)
     setDrawerOpen(false)
   }
@@ -204,11 +230,11 @@ export default function Page() {
     if (!user) return
 
     // Navigate back immediately so offline doesn't block the UI
-    setCurrentScreen("tasks")
+    setCurrentScreen(returnScreen)
 
     // Easter egg: Check if due date is December 20
     if (newTask.dueDate) {
-      const dueDate = new Date(newTask.dueDate)
+      const dueDate = parseTaskDate(newTask.dueDate)
       if (dueDate.getMonth() === 11 && dueDate.getDate() === 20) {
         setShowEasterEgg(true)
       }
@@ -239,6 +265,7 @@ export default function Page() {
             title: created.title,
             alarm: created.alarm,
             repeats: created.repeats,
+            dueDate: created.dueDate,
           })
           
           startForegroundReminder({
@@ -252,7 +279,7 @@ export default function Page() {
 
         // Add birthday task automatically if December 20
         if (newTask.dueDate) {
-          const dueDate = new Date(newTask.dueDate)
+          const dueDate = parseTaskDate(newTask.dueDate)
           if (dueDate.getMonth() === 11 && dueDate.getDate() === 20) {
             const hasBirthdayTask = tasks.some(
               (t) => t.title === "İrfan Kerem Arslan DOGUM GÜNÜ" && t.dueDate === newTask.dueDate
@@ -294,6 +321,7 @@ export default function Page() {
         title: task.title,
         alarm: task.alarm,
         repeats: task.repeats,
+        dueDate: task.dueDate,
       })
       startForegroundReminder({
         id: task.id,
@@ -308,23 +336,23 @@ export default function Page() {
   const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
     if (!user) return
     
-    const storageUpdates: Partial<StoredTask> = {}
+    const storageUpdates: CloudTaskUpdates = {}
     if (updates.title) storageUpdates.title = updates.title
-    if (updates.detail !== undefined) storageUpdates.detail = updates.detail
-    if ('photo' in updates) storageUpdates.photo = updates.photo || undefined
-    if (updates.dueDate !== undefined) storageUpdates.dueDate = updates.dueDate
-    if (updates.alarm !== undefined) storageUpdates.alarm = updates.alarm
-    if (updates.repeats !== undefined) storageUpdates.repeats = updates.repeats
+    if ('detail' in updates) storageUpdates.detail = updates.detail ?? null
+    if ('photo' in updates) storageUpdates.photo = updates.photo ?? null
+    if ('dueDate' in updates) storageUpdates.dueDate = updates.dueDate ?? null
+    if ('alarm' in updates) storageUpdates.alarm = updates.alarm ?? null
+    if ('repeats' in updates) storageUpdates.repeats = updates.repeats ?? null
     
     await updateCloudTask(user.uid, taskId, storageUpdates)
     
     // Update notification if alarm changed
     const task = tasks.find(t => t.id === taskId)
     if (task) {
-      const newAlarm = updates.alarm !== undefined ? updates.alarm : task.alarm
-      const newRepeats = updates.repeats !== undefined ? updates.repeats : task.repeats
+      const newAlarm = 'alarm' in updates ? updates.alarm : task.alarm
+      const newRepeats = 'repeats' in updates ? updates.repeats : task.repeats
       const newTitle = updates.title || task.title
-      const newDueDate = updates.dueDate !== undefined ? updates.dueDate : task.dueDate
+      const newDueDate = 'dueDate' in updates ? updates.dueDate : task.dueDate
       
       if (newAlarm) {
         scheduleTaskNotification({
@@ -332,6 +360,7 @@ export default function Page() {
           title: newTitle,
           alarm: newAlarm,
           repeats: newRepeats,
+          dueDate: newDueDate,
         })
         startForegroundReminder({
           id: taskId,
@@ -364,14 +393,7 @@ export default function Page() {
 
   // Auth loading state
   if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[var(--obsidian)] text-[var(--metal-bright)] flex items-center justify-center relative z-10">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div className="w-3 h-3 rounded-full bg-[var(--ember)]" style={{ animation: 'pulseGlow 2s ease-in-out infinite' }} />
-          <div className="text-[var(--metal-muted)] text-sm font-light tracking-widest" style={{ fontFamily: 'var(--font-display)' }}>LOADING</div>
-        </div>
-      </div>
-    )
+    return <LoadingScreen label="Loading your account" />
   }
 
   // Show login screen if not authenticated
@@ -381,21 +403,19 @@ export default function Page() {
 
   // Loading tasks state
   if (loading) {
-    return (
-      <div className="min-h-screen bg-[var(--obsidian)] text-[var(--metal-bright)] flex items-center justify-center relative z-10">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div className="w-3 h-3 rounded-full bg-[var(--ember)]" style={{ animation: 'pulseGlow 2s ease-in-out infinite' }} />
-          <div className="text-[var(--metal-muted)] text-sm font-light tracking-widest" style={{ fontFamily: 'var(--font-display)' }}>SYNCING</div>
-        </div>
-      </div>
-    )
+    return <LoadingScreen label="Synchronizing tasks" />
   }
 
   return (
-    <div className="relative min-h-screen bg-transparent text-[var(--metal-bright)] overflow-hidden" style={{ position: 'relative', zIndex: 1 }}>
+    <div className="xp-app-shell">
       {/* Drawer Overlay */}
       {drawerOpen && (
-        <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setDrawerOpen(false)} />
+        <button
+          type="button"
+          className="xp-drawer-overlay"
+          aria-label="Close menu"
+          onClick={() => setDrawerOpen(false)}
+        />
       )}
 
       {/* Sliding Drawer */}
@@ -406,12 +426,15 @@ export default function Page() {
       />
 
       {/* Main Content */}
-      <div className="relative z-10">
+      <div className="relative z-10 h-full">
         {currentScreen === "tasks" && (
           <TasksGridScreen
             tasks={tasks.filter((t) => !t.completed)}
             onTaskClick={handleTaskClick}
-            onAddTask={() => setCurrentScreen("add")}
+            onAddTask={() => {
+              setReturnScreen("tasks")
+              setCurrentScreen("add")
+            }}
             onDeleteTask={handleDeleteTask}
             onOpenDrawer={() => setDrawerOpen(true)}
             onReorderTasks={async (reorderedTasks) => {
@@ -438,7 +461,10 @@ export default function Page() {
           <TasksGridScreen
             tasks={tasks.filter((t) => t.completed)}
             onTaskClick={handleTaskClick}
-            onAddTask={() => setCurrentScreen("add")}
+            onAddTask={() => {
+              setReturnScreen("completed")
+              setCurrentScreen("add")
+            }}
             onDeleteTask={handleDeleteTask}
             onOpenDrawer={() => setDrawerOpen(true)}
             isCompletedView={true}
@@ -451,6 +477,7 @@ export default function Page() {
             onSelectTask={handleTaskClick}
             onAddTask={(date) => {
               setCalendarDueDate(date)
+              setReturnScreen("calendar")
               setCurrentScreen("add")
             }}
           />
@@ -458,7 +485,7 @@ export default function Page() {
         {currentScreen === "detail" && selectedTask && (
           <TaskDetailScreen
             task={selectedTask}
-            onBack={() => setCurrentScreen(selectedTask.completed ? "completed" : "tasks")}
+            onBack={() => setCurrentScreen(returnScreen)}
             onOpenDrawer={() => setDrawerOpen(true)}
             onToggleComplete={handleToggleComplete}
             onUpdateTask={handleUpdateTask}
@@ -473,7 +500,7 @@ export default function Page() {
             }}
             onCancel={() => {
               setCalendarDueDate(undefined)
-              setCurrentScreen("tasks")
+              setCurrentScreen(returnScreen)
             }}
             onOpenDrawer={() => setDrawerOpen(true)}
             initialDueDate={calendarDueDate}
@@ -482,7 +509,7 @@ export default function Page() {
         {currentScreen === "settings" && (
           <SettingsScreen
             tasks={tasks}
-            onBack={() => setCurrentScreen("tasks")}
+            onBack={() => setCurrentScreen(returnScreen)}
             onOpenDrawer={() => setDrawerOpen(true)}
             onDataImported={handleReloadTasks}
           />
@@ -491,19 +518,20 @@ export default function Page() {
 
       {/* Easter Egg Modal - December 20 */}
       {showEasterEgg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-          <div className="relative">
-            <button
-              onClick={() => setShowEasterEgg(false)}
-              className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-[var(--forge-red)] text-white flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all z-10"
-            >
-              ✕
-            </button>
+        <div className="xp-modal-backdrop">
+          <div className="xp-dialog" role="dialog" aria-modal="true" aria-label="December 20">
+            <div className="xp-titlebar">
+              <div className="xp-titlebar-caption">December 20</div>
+              <button type="button" className="xp-dialog-close" onClick={() => setShowEasterEgg(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="xp-dialog-body">
             <img 
               src="/easter-egg.png" 
               alt="Easter Egg" 
-              className="max-w-[80vw] max-h-[80vh] rounded-lg shadow-2xl"
+              className="max-w-[80vw] max-h-[72vh] object-contain"
             />
+            </div>
+            <div className="xp-actionbar"><button type="button" className="xp-button" onClick={() => setShowEasterEgg(false)}>OK</button></div>
           </div>
         </div>
       )}

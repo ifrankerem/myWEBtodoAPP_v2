@@ -6,10 +6,6 @@ const nextConfig = {
   // Required for static export
   trailingSlash: true,
 
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  
   images: {
     unoptimized: true,
   },

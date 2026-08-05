@@ -10,6 +10,7 @@ import {
   signInWithPopup,
   type User,
 } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app';
 import { getAuthInstance } from './firebase';
 
 interface AuthContextType {
@@ -44,8 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setError(null);
       await signInWithEmailAndPassword(getAuthInstance(), email, password);
-    } catch (err: any) {
-      const message = getAuthErrorMessage(err.code);
+    } catch (err: unknown) {
+      const message = getAuthErrorMessage(getAuthErrorCode(err));
       setError(message);
       throw err;
     }
@@ -55,8 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setError(null);
       await createUserWithEmailAndPassword(getAuthInstance(), email, password);
-    } catch (err: any) {
-      const message = getAuthErrorMessage(err.code);
+    } catch (err: unknown) {
+      const message = getAuthErrorMessage(getAuthErrorCode(err));
       setError(message);
       throw err;
     }
@@ -67,9 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       const provider = new GoogleAuthProvider();
       await signInWithPopup(getAuthInstance(), provider);
-    } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') return;
-      const message = getAuthErrorMessage(err.code);
+    } catch (err: unknown) {
+      const code = getAuthErrorCode(err);
+      if (code === 'auth/popup-closed-by-user') return;
+      const message = getAuthErrorMessage(code);
       setError(message);
       throw err;
     }
@@ -79,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setError(null);
       await firebaseSignOut(getAuthInstance());
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError('Failed to sign out. Please try again.');
       throw err;
     }
@@ -100,6 +102,10 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+function getAuthErrorCode(error: unknown): string {
+  return error instanceof FirebaseError ? error.code : '';
 }
 
 // Human-readable error messages

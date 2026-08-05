@@ -14,6 +14,7 @@ export interface TaskRecord {
   alarm?: string;
   repeats?: string;
   dueDate?: string;
+  sortOrder?: number;
 }
 
 class TaskManagerDatabase extends Dexie {

@@ -1,8 +1,18 @@
 "use client"
 
-import { useState } from "react"
-import { Menu, X, CheckCircle, GripVertical, Plus, Trash2 } from "lucide-react"
+import { useEffect, useState } from "react"
+import {
+  CheckCircle,
+  Cloud,
+  FileText,
+  LayoutGrid,
+  List,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react"
 import type { Task } from "@/app/page"
+import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 import {
   DndContext,
   closestCenter,
@@ -10,15 +20,18 @@ import {
   MouseSensor,
   useSensor,
   useSensors,
-  DragEndEvent,
+  type DragEndEvent,
 } from "@dnd-kit/core"
 import {
   arrayMove,
   SortableContext,
   useSortable,
   rectSortingStrategy,
+  verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+
+type TaskView = "grid" | "list"
 
 interface TasksGridScreenProps {
   tasks: Task[]
@@ -33,97 +46,75 @@ interface TasksGridScreenProps {
 interface SortableTaskProps {
   task: Task
   eraseMode: boolean
+  canReorder: boolean
+  view: TaskView
   onTaskClick: (task: Task) => void
   onDeleteTask: (taskId: string) => void
-  index: number
 }
 
-function SortableTask({ task, eraseMode, onTaskClick, onDeleteTask, index }: SortableTaskProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: task.id })
-
+function SortableTask({ task, eraseMode, canReorder, view, onTaskClick, onDeleteTask }: SortableTaskProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    disabled: !canReorder,
+  })
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : transition,
-    zIndex: isDragging ? 50 : 1,
-    ...(isDragging ? {
-      scale: '1.06',
-      outline: '2.5px solid #D4915C',
-      outlineOffset: '0px',
-      borderRadius: '12px',
-      boxShadow: '0 0 24px 4px rgba(212, 145, 92, 0.45), 0 8px 32px rgba(0,0,0,0.5)',
-      filter: 'brightness(1.1)',
-    } : {}),
+    transition,
+    zIndex: isDragging ? 20 : 1,
+    outline: isDragging ? "2px dotted var(--xp-selection)" : undefined,
+    opacity: isDragging ? 0.85 : 1,
   }
 
-  // Stagger class: each card gets a delay based on index (cap at 10)
-  const staggerClass = `stagger-${Math.min(index + 1, 10)}`
+  const thumbnail = task.photo ? (
+    <img src={task.photo} alt="" className="xp-task-thumbnail" />
+  ) : (
+    <span className="xp-task-file-icon" aria-hidden="true">
+      <FileText />
+    </span>
+  )
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative ${eraseMode ? "animate-wiggle" : `animate-fade-in-up ${staggerClass}`}`}
+      className={`xp-task-item xp-task-item-${view}${eraseMode ? " animate-wiggle" : ""}`}
     >
-      {/* Drag Handle - only show when not in erase mode */}
-      {!eraseMode && (
-        <div
+      {!eraseMode && canReorder && (
+        <button
+          type="button"
+          className="xp-drag-handle"
+          aria-label={`Reorder ${task.title}`}
           {...attributes}
           {...listeners}
-          className="absolute top-2 left-2 z-10 p-1.5 rounded-lg cursor-grab active:cursor-grabbing touch-none"
-          style={isDragging 
-            ? { backgroundColor: '#D4915C', boxShadow: '0 0 10px rgba(212,145,92,0.6)' }
-            : { backgroundColor: 'rgba(0,0,0,0.5)' }
-          }
         >
-          <GripVertical className={`w-4 h-4 ${isDragging ? "text-black" : "text-white/70"}`} />
-        </div>
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+        </button>
       )}
-      
       <button
+        type="button"
+        className="xp-task-open"
         onClick={() => !eraseMode && !isDragging && onTaskClick(task)}
-        className="w-full aspect-square rounded-xl transition-all duration-300 overflow-hidden group border bg-[var(--obsidian-1)] hover:bg-[var(--obsidian-2)] hover:border-[var(--ember)] hover:shadow-[0_0_15px_rgba(var(--ember-rgb),0.15)]"
-        style={isDragging 
-          ? { borderColor: '#D4915C', borderWidth: '2px', background: 'var(--obsidian-2)' }
-          : { borderColor: 'var(--obsidian-border)' }
-        }
+        disabled={eraseMode}
       >
-        {task.photo ? (
-          <div className="w-full h-full flex flex-col">
-            <div className="h-[70%] min-h-0 relative overflow-hidden">
-              <img
-                src={task.photo || "/placeholder.svg"}
-                alt={task.title}
-                className="w-full h-full object-cover object-center group-hover:scale-[1.03] transition-transform duration-500"
-              />
-            </div>
-            <div className="h-[30%] flex items-center px-3 bg-[var(--obsidian)] border-t border-[var(--obsidian-border)]">
-              <p className="text-xs text-[var(--metal-bright)] font-medium truncate w-full">{task.title}</p>
-            </div>
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center p-4">
-            <p className="text-sm text-[var(--metal-bright)] font-medium text-center line-clamp-3">{task.title}</p>
-          </div>
-        )}
+        {thumbnail}
+        <span className="xp-task-copy">
+          <strong>{task.title}</strong>
+          {view === "list" && (
+            <small>{task.detail || task.dueDate || (task.completed ? "Completed task" : "Task")}</small>
+          )}
+        </span>
+        {task.completed && !eraseMode && <CheckCircle className="xp-task-complete" aria-label="Completed" />}
       </button>
-      {task.completed && !eraseMode && (
-        <div className="absolute -top-2 -right-2 w-7 h-7 bg-[var(--forge-green)] rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(var(--forge-green-rgb),0.4)]">
-          <CheckCircle className="w-4 h-4 text-white" />
-        </div>
-      )}
       {eraseMode && (
         <button
+          type="button"
+          className="xp-delete-task"
           onClick={() => onDeleteTask(task.id)}
-          className="absolute -top-2 -right-2 w-7 h-7 bg-[var(--forge-red)] rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(var(--forge-red-rgb),0.4)] hover:brightness-110 transition-colors"
+          aria-label={`Delete ${task.title}`}
         >
-          <X className="w-4 h-4 text-white" />
+          <X />
         </button>
       )}
     </div>
@@ -140,112 +131,119 @@ export default function TasksGridScreen({
   isCompletedView = false,
 }: TasksGridScreenProps) {
   const [eraseMode, setEraseMode] = useState(false)
+  const [view, setView] = useState<TaskView>("grid")
 
-  // Sensors for both mouse and touch with delay for touch
+  useEffect(() => {
+    const stored = window.localStorage.getItem("task-view")
+    if (stored === "grid" || stored === "list") setView(stored)
+  }, [])
+
+  const switchView = (nextView: TaskView) => {
+    setView(nextView)
+    window.localStorage.setItem("task-view", nextView)
+  }
+
   const sensors = useSensors(
-    useSensor(MouseSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 200,
-        tolerance: 5,
-      },
-    })
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
   )
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
+    if (!over || active.id === over.id) return
 
-    if (over && active.id !== over.id) {
-      const oldIndex = tasks.findIndex((t) => t.id === active.id)
-      const newIndex = tasks.findIndex((t) => t.id === over.id)
-      
-      const newTasks = arrayMove(tasks, oldIndex, newIndex)
-      
-      if (onReorderTasks) {
-        onReorderTasks(newTasks)
-      }
-    }
+    const oldIndex = tasks.findIndex((task) => task.id === active.id)
+    const newIndex = tasks.findIndex((task) => task.id === over.id)
+    if (oldIndex !== -1 && newIndex !== -1) onReorderTasks?.(arrayMove(tasks, oldIndex, newIndex))
   }
 
+  const title = isCompletedView ? "Completed" : "Tasks"
+
   return (
-    <div className="h-screen flex flex-col bg-transparent relative">
-      {/* Fixed Header */}
-      <div className="flex-shrink-0 flex items-center justify-between p-6 pb-4 z-20 animate-fade-in">
-        <button onClick={onOpenDrawer} className="p-2 hover:bg-[var(--obsidian-2)] rounded-lg transition-colors">
-          <Menu className="w-6 h-6 text-[var(--metal-muted)]" />
-        </button>
-        <h1 
-          className="text-sm font-bold tracking-[0.2em] text-[var(--metal-muted)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {isCompletedView ? "COMPLETED" : "TASKS"}
-        </h1>
-        <div className="w-10" />
-      </div>
+    <section className="xp-screen" aria-label={title}>
+      <XpHeader
+        title={title}
+        onOpenDrawer={onOpenDrawer}
+        actions={
+          <>
+            <div className="xp-view-toggle" aria-label="Task view">
+              <button
+                type="button"
+                className="xp-button"
+                aria-pressed={view === "grid"}
+                onClick={() => switchView("grid")}
+                title="Grid view"
+              >
+                <LayoutGrid />
+                <span className="hidden sm:inline">Grid</span>
+              </button>
+              <button
+                type="button"
+                className="xp-button"
+                aria-pressed={view === "list"}
+                onClick={() => switchView("list")}
+                title="List view"
+              >
+                <List />
+                <span className="hidden sm:inline">List</span>
+              </button>
+            </div>
+            {!isCompletedView && (
+              <button type="button" className="xp-button" onClick={onAddTask}>
+                <Plus /> Add Task
+              </button>
+            )}
+            <button
+              type="button"
+              className={`xp-button${eraseMode ? " xp-button-danger" : ""}`}
+              aria-pressed={eraseMode}
+              onClick={() => setEraseMode((active) => !active)}
+            >
+              {eraseMode ? <CheckCircle /> : <Trash2 />}
+              <span>{eraseMode ? "Done" : "Delete"}</span>
+            </button>
+          </>
+        }
+      />
 
-      {/* Scrollable Task Grid - only scrollable when there are tasks */}
-      <div className={`flex-1 px-6 pb-32 ${tasks.length > 0 ? 'overflow-y-auto' : 'overflow-hidden'}`}>
-        {isCompletedView && tasks.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center animate-fade-in">
-            <CheckCircle className="w-16 h-16 text-[var(--obsidian-border)] mb-4" />
-            <p className="text-[var(--metal-muted)] text-sm font-light">No completed tasks yet</p>
-          </div>
-        ) : tasks.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center animate-fade-in">
-            <p className="text-[var(--metal-muted)] text-sm font-light">No tasks yet. Tap the + button to create one.</p>
-          </div>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={tasks.map(t => t.id)} strategy={rectSortingStrategy}>
-              <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
-                {tasks.map((task, index) => (
-                  <SortableTask
-                    key={task.id}
-                    task={task}
-                    eraseMode={eraseMode}
-                    onTaskClick={onTaskClick}
-                    onDeleteTask={onDeleteTask}
-                    index={index}
-                  />
-                ))}
+      <main className="xp-content">
+        <div className="xp-inset xp-task-browser">
+          {tasks.length === 0 ? (
+            <div className="xp-empty">
+              <div>
+                <FileText aria-hidden="true" />
+                <p>{isCompletedView ? "No completed tasks yet." : "No tasks yet. Use Add Task to create one."}</p>
               </div>
-            </SortableContext>
-          </DndContext>
-        )}
-      </div>
+            </div>
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext
+                items={tasks.map((task) => task.id)}
+                strategy={view === "grid" ? rectSortingStrategy : verticalListSortingStrategy}
+              >
+                <div className={`xp-task-collection xp-task-collection-${view}`}>
+                  {tasks.map((task) => (
+                    <SortableTask
+                      key={task.id}
+                      task={task}
+                      eraseMode={eraseMode}
+                      canReorder={Boolean(onReorderTasks)}
+                      view={view}
+                      onTaskClick={onTaskClick}
+                      onDeleteTask={onDeleteTask}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+        </div>
+      </main>
 
-      {/* Floating Action Buttons */}
-      <div className="fixed bottom-8 right-6 flex flex-col gap-4 z-30">
-        {/* Erase/Done Button */}
-        <button
-          onClick={() => setEraseMode(!eraseMode)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 animate-fade-in-up stagger-2 ${
-            eraseMode 
-              ? "bg-[var(--forge-green)] text-white shadow-[0_4px_20px_rgba(var(--forge-green-rgb),0.4)]" 
-              : "bg-[var(--obsidian-2)] text-[var(--metal-muted)] hover:bg-[var(--obsidian-border)] shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
-          }`}
-        >
-          {eraseMode ? <CheckCircle className="w-6 h-6" /> : <Trash2 className="w-5 h-5" />}
-        </button>
-        
-        {/* Add Task Button - Primary FAB */}
-        {!isCompletedView && (
-          <button
-            onClick={onAddTask}
-            className="w-16 h-16 rounded-full bg-[var(--ember)] text-[var(--obsidian)] flex items-center justify-center shadow-lg hover:brightness-110 active:scale-95 transition-all shadow-[0_4px_25px_rgba(var(--ember-rgb),0.4)] animate-fade-in-up stagger-3"
-          >
-            <Plus className="w-7 h-7" strokeWidth={2.5} />
-          </button>
-        )}
-      </div>
-    </div>
+      <XpStatusBar>
+        <span className="flex-1">{tasks.length} object{tasks.length === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5 text-[var(--xp-green)]" /> All synced</span>
+      </XpStatusBar>
+    </section>
   )
 }

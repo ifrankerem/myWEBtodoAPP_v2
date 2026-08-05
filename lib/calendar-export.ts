@@ -1,6 +1,8 @@
 // Calendar export utility for iOS PWA alarm fallback
 // Generates .ics files that can be imported into native calendar apps
 
+import { parseAlarmTime, parseTaskDate } from './task-dates';
+
 interface CalendarEvent {
   id: string;
   title: string;
@@ -27,19 +29,6 @@ function formatDateToICS(date: Date): string {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
-// Parse alarm time "HH:MM" to hours and minutes
-function parseAlarmTime(alarm: string): { hour: number; minute: number } | null {
-  const match = alarm.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  
-  const hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
-  
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  
-  return { hour, minute };
-}
-
 // Generate a single calendar event
 function generateEvent(event: CalendarEvent): string {
   const time = parseAlarmTime(event.alarm);
@@ -49,7 +38,7 @@ function generateEvent(event: CalendarEvent): string {
   let startDate: Date;
   
   if (event.dueDate) {
-    startDate = new Date(event.dueDate);
+    startDate = parseTaskDate(event.dueDate);
   } else {
     startDate = new Date();
   }
@@ -57,7 +46,7 @@ function generateEvent(event: CalendarEvent): string {
   startDate.setHours(time.hour, time.minute, 0, 0);
   
   // If no repeat and date is in the past, use next occurrence
-  if (!event.repeats && startDate <= new Date()) {
+  if (!event.dueDate && !event.repeats && startDate <= new Date()) {
     startDate.setDate(startDate.getDate() + 1);
   }
   
@@ -128,7 +117,7 @@ function escapeICSText(text: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
+    .replace(/\r\n|\n|\r/g, '\\n');
 }
 
 // Generate full ICS calendar file
