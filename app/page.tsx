@@ -35,6 +35,8 @@ import {
   startForegroundReminder,
   stopForegroundReminder,
 } from "@/lib/web-notifications"
+import { syncAlarmSchedule } from "@/lib/alarm-sync"
+import { refreshPushSubscription } from "@/lib/push-subscription"
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
@@ -156,6 +158,12 @@ export default function Page() {
         
         initializeNotifications(taskData)
         initializeForegroundReminders(taskData)
+
+        // Foreground timers die the moment iOS suspends the PWA, so mirror the
+        // schedule to Firestore and let the push worker deliver it instead.
+        syncAlarmSchedule(user.uid, taskData).catch((err) => {
+          console.error('Alarm schedule sync failed:', err)
+        })
       }, () => {
         // Avoid trapping the user on the loading screen when Firestore is unavailable.
         setLoading(false)
@@ -178,6 +186,25 @@ export default function Page() {
       }
     }
   }, [user, authLoading])
+
+  // Keep the stored push endpoint fresh — iOS rotates endpoints, and the
+  // worker can only reach devices it finds in Firestore.
+  useEffect(() => {
+    if (!user) return
+
+    refreshPushSubscription(user.uid)
+
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'pushsubscriptionchange') {
+        refreshPushSubscription(user.uid)
+      }
+    }
+
+    navigator.serviceWorker.addEventListener('message', handleMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', handleMessage)
+  }, [user])
 
   // Handle hardware back button on Android
   useEffect(() => {

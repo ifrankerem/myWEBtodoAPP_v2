@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// The Cloudflare Worker authenticates with a service account, which bypasses
+// these rules entirely. They only constrain the browser client.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Each user owns their tasks and their registered push endpoints.
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Alarm schedule mirror, kept top-level so the worker can run one query
+    // across all users. A user may only touch rows carrying their own uid.
+    match /alarms/{alarmId} {
+      allow read, delete: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+
+      allow create, update: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && alarmId == request.auth.uid + '__' + request.resource.data.taskId;
+    }
+  }
+}
