@@ -1,4 +1,4 @@
-const CACHE_NAME = 'task-manager-xp-v4';
+const CACHE_NAME = 'task-manager-xp-v5';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -8,7 +8,7 @@ const STATIC_ASSETS = [
 ];
 
 // Dynamic cache for Next.js chunks and other assets
-const DYNAMIC_CACHE = 'task-manager-dynamic-xp-v4';
+const DYNAMIC_CACHE = 'task-manager-dynamic-xp-v5';
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -144,4 +144,93 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
   }
+});
+
+// --- Web Push ---------------------------------------------------------------
+// This is what makes alarms work when the app is closed. In-page setTimeout is
+// killed as soon as iOS suspends the web app, so the alarm has to arrive from
+// the push service instead.
+
+const DEFAULT_NOTIFICATION = {
+  title: '🔔 ALARM',
+  body: 'You have a task due.',
+  tag: 'task-alarm',
+  url: '/',
+};
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = { body: event.data.text() };
+    }
+  }
+
+  const title = payload.title || DEFAULT_NOTIFICATION.title;
+  const url = payload.url || DEFAULT_NOTIFICATION.url;
+
+  // iOS requires every push to show a notification, otherwise it revokes the
+  // push subscription after repeated silent pushes.
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: payload.body || DEFAULT_NOTIFICATION.body,
+      tag: payload.tag || DEFAULT_NOTIFICATION.tag,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      requireInteraction: true,
+      renotify: true,
+      timestamp: payload.fireAt || Date.now(),
+      data: { url, taskId: payload.taskId || null },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = new URL(
+    (event.notification.data && event.notification.data.url) || '/',
+    self.location.origin
+  ).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
+          if ('navigate' in client) client.navigate(targetUrl).catch(() => {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});
+
+// Push endpoints rotate. Re-subscribe with the same server key and let the app
+// re-persist the new endpoint the next time it is opened.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  const applicationServerKey =
+    (event.oldSubscription && event.oldSubscription.options
+      ? event.oldSubscription.options.applicationServerKey
+      : null);
+
+  if (!applicationServerKey) return;
+
+  event.waitUntil(
+    self.registration.pushManager
+      .subscribe({ userVisibleOnly: true, applicationServerKey })
+      .then((subscription) =>
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+          for (const client of clientList) {
+            client.postMessage({
+              type: 'pushsubscriptionchange',
+              subscription: subscription.toJSON(),
+            });
+          }
+        })
+      )
+      .catch(() => {})
+  );
 });

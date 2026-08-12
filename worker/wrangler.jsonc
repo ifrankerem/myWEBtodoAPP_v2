@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "task-alarm-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-15",
+  "observability": {
+    "enabled": true
+  },
+  // Needed for the /health and /run endpoints. The cron trigger itself would
+  // work without any route.
+  "workers_dev": true,
+  // Per-version preview URLs are not useful here and only widen the surface.
+  "preview_urls": false,
+  "triggers": {
+    // Cron granularity is one minute, which is also the alarm granularity.
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "VAPID_SUBJECT": "mailto:irfankeremarslann@gmail.com",
+    "APP_URL": "https://my-we-btodo-app-v2.vercel.app/"
+  }
+  // Secrets (set with `npx wrangler secret put <NAME>`):
+  //   FIREBASE_SERVICE_ACCOUNT  - full service account JSON, one line
+  //   VAPID_PUBLIC_KEY          - base64url public key
+  //   VAPID_PRIVATE_KEY         - base64url private key
+  //   TRIGGER_SECRET            - optional, enables POST /run for manual testing
+}

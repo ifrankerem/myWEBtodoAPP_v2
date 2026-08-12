@@ -5,6 +5,13 @@ import { useEffect, useState } from "react"
 import type { Task } from "@/app/page"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
 import { isWebNotificationSupported, requestWebNotificationPermission } from "@/lib/web-notifications"
+import {
+  disablePush,
+  enablePush,
+  getPushEnvironment,
+  isPushEnabled,
+  type PushBlockReason,
+} from "@/lib/push-subscription"
 import { useAuth } from "@/lib/auth-context"
 import { createCloudTask } from "@/lib/storage-cloud"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
@@ -18,6 +25,16 @@ interface SettingsScreenProps {
 
 type NotificationStatus = NotificationPermission | "not-supported" | "checking"
 type ImportResult = { success: boolean; message: string }
+type PushState = "checking" | "on" | "off" | "blocked"
+
+const PUSH_BLOCK_COPY: Record<PushBlockReason, string> = {
+  "ios-needs-home-screen":
+    "On iPhone and iPad, background alarms only work once the app is installed: tap Share, then Add to Home Screen, and open it from there.",
+  "ios-too-old": "Background alarms need iOS 16.4 or newer.",
+  "unsupported-browser": "This browser does not support background push notifications.",
+  "missing-vapid-key": "Push is not configured on this deployment (NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing).",
+  "permission-denied": "Notifications are blocked. Enable them for this app in the system settings.",
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -33,9 +50,33 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking")
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [pushState, setPushState] = useState<PushState>("checking")
+  const [pushBlockedBy, setPushBlockedBy] = useState<PushBlockReason | null>(null)
+  const [pushBusy, setPushBusy] = useState(false)
 
   useEffect(() => {
     setNotificationStatus(isWebNotificationSupported() ? Notification.permission : "not-supported")
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const environment = getPushEnvironment()
+    if (environment.blockedBy) {
+      setPushBlockedBy(environment.blockedBy)
+      setPushState("blocked")
+      return
+    }
+
+    isPushEnabled().then((enabled) => {
+      if (cancelled) return
+      setPushBlockedBy(null)
+      setPushState(enabled ? "on" : "off")
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const showResult = (result: ImportResult) => {
@@ -141,6 +182,49 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     setNotificationStatus(granted ? "granted" : "denied")
   }
 
+  const handleTogglePush = async () => {
+    if (!user) return
+    setPushBusy(true)
+
+    try {
+      if (pushState === "on") {
+        await disablePush(user.uid)
+        setPushState("off")
+        showResult({ success: true, message: "Background alarms turned off." })
+        return
+      }
+
+      const result = await enablePush(user.uid)
+      if (result.ok) {
+        setPushBlockedBy(null)
+        setPushState("on")
+        setNotificationStatus("granted")
+        showResult({ success: true, message: "Background alarms are on for this device." })
+        return
+      }
+
+      if (result.reason === "subscribe-failed" || !result.reason) {
+        showResult({ success: false, message: "Could not register this device for push." })
+        setPushState("off")
+        return
+      }
+
+      setPushBlockedBy(result.reason)
+      setPushState("blocked")
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  const pushCopy =
+    pushState === "checking"
+      ? "Checking this device..."
+      : pushState === "on"
+        ? "On — alarms are delivered even when the app is closed."
+        : pushState === "blocked"
+          ? PUSH_BLOCK_COPY[pushBlockedBy ?? "unsupported-browser"]
+          : "Off — alarms only fire while the app is open on screen."
+
   const notificationCopy = notificationStatus === "granted"
     ? "Enabled — reminders may appear while the app is open."
     : notificationStatus === "denied"
@@ -170,6 +254,28 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
 
           <section className="xp-groupbox">
             <span className="xp-groupbox-title"><Bell /> Notifications</span>
+            <div className="xp-settings-row">
+              <div><strong>Background Alarms</strong><p>{pushCopy}</p></div>
+              {pushState === "on" && <span className="xp-badge xp-badge-success">On</span>}
+              {(pushState === "off" || pushState === "blocked") && (
+                <button
+                  type="button"
+                  className="xp-button"
+                  onClick={handleTogglePush}
+                  disabled={pushBusy || pushBlockedBy === "ios-needs-home-screen" || pushBlockedBy === "ios-too-old" || pushBlockedBy === "unsupported-browser" || pushBlockedBy === "missing-vapid-key"}
+                >
+                  {pushBusy ? "Working..." : "Turn On"}
+                </button>
+              )}
+            </div>
+            {pushState === "on" && (
+              <div className="xp-settings-row">
+                <div><strong>Turn Off</strong><p>Stop delivering alarms to this device.</p></div>
+                <button type="button" className="xp-button" onClick={handleTogglePush} disabled={pushBusy}>
+                  {pushBusy ? "Working..." : "Turn Off"}
+                </button>
+              </div>
+            )}
             <div className="xp-settings-row">
               <div><strong>Web Notifications</strong><p>{notificationCopy}</p></div>
               {notificationStatus !== "checking" && notificationStatus !== "not-supported" && notificationStatus !== "granted" && <button type="button" className="xp-button" onClick={handleRequestNotifications}>Enable</button>}

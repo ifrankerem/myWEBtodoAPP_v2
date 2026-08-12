@@ -43,3 +43,12 @@ yarn-error.log*
 
 # Vercel
 .vercel
+
+# Cloudflare Workers
+.wrangler/
+worker/.wrangler/
+# Never commit the Firebase service account or VAPID private key
+worker/.dev.vars
+worker/.vapid.json
+service-account*.json
+*-firebase-adminsdk-*.json

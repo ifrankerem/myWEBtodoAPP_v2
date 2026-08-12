@@ -1,0 +1,13 @@
+# Local-only secrets for `wrangler dev`. Copy to `.dev.vars` and fill in.
+# `.dev.vars` is gitignored — never commit real credentials.
+
+# Whole service account JSON on a single line (escape newlines in private_key as \n)
+FIREBASE_SERVICE_ACCOUNT={"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"...@....iam.gserviceaccount.com"}
+
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:you@example.com
+APP_URL=https://your-app.vercel.app/
+
+# Optional: enables GET /run for manual testing
+TRIGGER_SECRET=

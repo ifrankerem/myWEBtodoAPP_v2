@@ -221,12 +221,43 @@ Settings → Export to Calendar → Downloads `.ics` file with all alarms
 
 ## 🔔 Notification System
 
-| Platform | Notification Type |
-|----------|------------------|
-| **Android Native** | Capacitor Local Notifications with custom alarm channel |
-| **iOS Native** | Capacitor Local Notifications |
-| **Web PWA** | Browser Notification API with foreground reminders |
-| **iOS PWA Fallback** | Calendar export for native iOS Calendar alarms |
+| Platform | Notification Type | Works when app is closed? |
+|----------|------------------|---------------------------|
+| **Web / iOS PWA** | Web Push, delivered by the Cloudflare Worker cron | ✅ Yes |
+| **Web PWA (in-app)** | Browser Notification API with foreground reminders | ❌ Foreground only |
+| **Android Native** | Capacitor Local Notifications with custom alarm channel | ✅ Yes |
+| **iOS Native** | Capacitor Local Notifications | ✅ Yes |
+| **Any platform** | Calendar export for system Calendar alarms | ✅ Yes |
+
+### Background alarms on iOS
+
+A PWA cannot wake itself up. In-page `setTimeout` reminders die the moment iOS
+suspends the web app, so alarms need to arrive as **Web Push** from a server.
+That server is `worker/` — a Cloudflare Worker cron that fires every minute.
+
+Requirements on iOS:
+
+- iOS **16.4 or newer**
+- The app must be **added to the Home Screen** and opened from there — Safari
+  tabs never receive push
+- Notifications must be enabled once from **Settings → Background Alarms**
+  (the permission prompt only appears from that tap)
+
+Setup:
+
+1. Follow [`worker/README.md`](./worker/README.md) to generate VAPID keys,
+   configure secrets, and deploy the worker.
+2. Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY` in `.env.local` and in the Vercel project
+   to the **same public key** the worker uses.
+3. Deploy the Firestore rules and indexes:
+   `npx firebase-tools deploy --only firestore:rules,firestore:indexes`
+   (the CLI package is `firebase-tools`; the `firebase` package is the client
+   SDK and ships no executable)
+
+Data flow: the app writes each task's next fire time to the `alarms`
+collection and its push endpoint to `users/{uid}/pushSubscriptions`; the worker
+queries due alarms once a minute, sends the push, and re-arms repeats in the
+alarm's original timezone.
 
 ---
 

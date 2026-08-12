@@ -6,7 +6,8 @@ const compat = new FlatCompat({
 
 const config = [
   {
-    ignores: ['.next/**', 'out/**', 'node_modules/**', 'next-env.d.ts'],
+    // `worker/` is a separate Cloudflare Workers package with its own tsconfig.
+    ignores: ['.next/**', 'out/**', 'node_modules/**', 'next-env.d.ts', 'worker/**'],
   },
   ...compat.config({
     extends: ['next/core-web-vitals', 'next/typescript'],
