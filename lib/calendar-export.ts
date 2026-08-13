@@ -1,6 +1,7 @@
 // Calendar export utility for iOS PWA alarm fallback
 // Generates .ics files that can be imported into native calendar apps
 
+import { isRepeating, toRepeatRule, type RepeatRule } from './repeat-rule';
 import { parseAlarmTime, parseTaskDate } from './task-dates';
 
 interface CalendarEvent {
@@ -8,20 +9,30 @@ interface CalendarEvent {
   title: string;
   description?: string;
   alarm: string; // "HH:MM" format
-  repeats?: string; // "Mon, Wed, Fri" format
+  repeats?: string; // legacy "Mon, Wed, Fri" format
+  repeatRule?: RepeatRule;
   dueDate?: string; // "YYYY-MM-DD" format
 }
 
-// Convert day names to RRULE format
-const dayNameToRRule: Record<string, string> = {
-  'Sun': 'SU',
-  'Mon': 'MO',
-  'Tue': 'TU',
-  'Wed': 'WE',
-  'Thu': 'TH',
-  'Fri': 'FR',
-  'Sat': 'SA',
-};
+// Weekday index (0 = Sunday) to RRULE day abbreviation
+const RRULE_DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+// Build the RRULE line for a repeat rule, or '' when the event does not repeat
+function toRRule(rule: RepeatRule): string {
+  switch (rule.kind) {
+    case 'none':
+      return '';
+    case 'daily':
+      return `RRULE:FREQ=DAILY${rule.interval > 1 ? `;INTERVAL=${rule.interval}` : ''}`;
+    case 'weekly': {
+      const days = rule.days.map((day) => RRULE_DAYS[day]).join(',');
+      if (!days) return '';
+      return `RRULE:FREQ=WEEKLY${rule.interval > 1 ? `;INTERVAL=${rule.interval}` : ''};BYDAY=${days}`;
+    }
+    case 'monthly':
+      return `RRULE:FREQ=MONTHLY;BYMONTHDAY=${rule.dayOfMonth}`;
+  }
+}
 
 // Format date to iCalendar format (YYYYMMDDTHHMMSS)
 function formatDateToICS(date: Date): string {
@@ -33,10 +44,12 @@ function formatDateToICS(date: Date): string {
 function generateEvent(event: CalendarEvent): string {
   const time = parseAlarmTime(event.alarm);
   if (!time) return '';
-  
+
+  const rule = toRepeatRule(event);
+
   // Calculate start date
   let startDate: Date;
-  
+
   if (event.dueDate) {
     startDate = parseTaskDate(event.dueDate);
   } else {
@@ -46,7 +59,7 @@ function generateEvent(event: CalendarEvent): string {
   startDate.setHours(time.hour, time.minute, 0, 0);
   
   // If no repeat and date is in the past, use next occurrence
-  if (!event.dueDate && !event.repeats && startDate <= new Date()) {
+  if (!event.dueDate && !isRepeating(rule) && startDate <= new Date()) {
     startDate.setDate(startDate.getDate() + 1);
   }
   
@@ -55,18 +68,7 @@ function generateEvent(event: CalendarEvent): string {
   endDate.setMinutes(endDate.getMinutes() + 30);
   
   // Generate RRULE for repeating events
-  let rrule = '';
-  if (event.repeats) {
-    const days = event.repeats.split(',').map(d => d.trim());
-    const rruleDays = days
-      .map(d => dayNameToRRule[d])
-      .filter(Boolean)
-      .join(',');
-    
-    if (rruleDays) {
-      rrule = `RRULE:FREQ=WEEKLY;BYDAY=${rruleDays}`;
-    }
-  }
+  const rrule = toRRule(rule);
   
   // Generate unique ID
   const uid = `task-${event.id}@taskmanager.app`;

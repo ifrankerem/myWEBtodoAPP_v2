@@ -10,11 +10,7 @@ import SettingsScreen from "@/components/settings-screen"
 import LoginScreen from "@/components/login-screen"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 import { useAuth } from "@/lib/auth-context"
-import { 
-  getTasks as getLocalTasks, 
-  fileToBase64,
-  type TaskRecord as StoredTask 
-} from "@/lib/storage-idb"
+import { getTasks as getLocalTasks, fileToBase64 } from "@/lib/storage-idb"
 import {
   subscribeToTasks,
   createCloudTask,
@@ -37,27 +33,17 @@ import {
 } from "@/lib/web-notifications"
 import { syncAlarmSchedule } from "@/lib/alarm-sync"
 import { refreshPushSubscription } from "@/lib/push-subscription"
+import {
+  dismissMissedAlarms,
+  subscribeToMissedAlarms,
+  type MissedAlarm,
+} from "@/lib/missed-alarms"
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 import { parseTaskDate } from '@/lib/task-dates'
+import { storedTaskToTask, type Screen, type Task } from '@/lib/task'
 
-export type Task = {
-  id: string
-  name: string
-  title: string
-  type: "picture" | "text" | "mixed"
-  photo?: string | null
-  detail?: string
-  createdDate: Date
-  lastEditedDate: Date
-  alarm?: string
-  repeats?: string
-  completed?: boolean
-  dueDate?: string
-}
-
-export type Screen = "tasks" | "calendar" | "detail" | "add" | "completed" | "settings"
 
 function LoadingScreen({ label }: { label: string }) {
   return (
@@ -75,24 +61,6 @@ function LoadingScreen({ label }: { label: string }) {
   )
 }
 
-// Transform stored task to frontend Task format
-function storedTaskToTask(stored: StoredTask): Task {
-  return {
-    id: stored.id,
-    name: stored.title,
-    title: stored.title,
-    type: stored.photo ? "picture" : "text",
-    photo: stored.photo || undefined,
-    detail: stored.detail || undefined,
-    createdDate: new Date(stored.createdAt),
-    lastEditedDate: new Date(stored.updatedAt),
-    alarm: stored.alarm || undefined,
-    repeats: stored.repeats || undefined,
-    completed: stored.completed,
-    dueDate: stored.dueDate || undefined,
-  }
-}
-
 export default function Page() {
   const { user, loading: authLoading } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<Screen>("tasks")
@@ -103,8 +71,37 @@ export default function Page() {
   const [showEasterEgg, setShowEasterEgg] = useState(false)
   const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
   const [returnScreen, setReturnScreen] = useState<Screen>("tasks")
+  const [missedAlarms, setMissedAlarms] = useState<MissedAlarm[]>([])
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const migrationDoneRef = useRef(false)
+  // Task id from a ?task=<id> notification deep link, held until tasks load.
+  const pendingTaskIdRef = useRef<string | null>(null)
+
+  // Read the deep link once, before the task list arrives. The URL is cleaned
+  // immediately so a refresh does not keep reopening the same task.
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get("task")
+    if (!taskId) return
+
+    pendingTaskIdRef.current = taskId
+    const url = new URL(window.location.href)
+    url.searchParams.delete("task")
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash)
+  }, [])
+
+  // Once tasks are loaded, open the one the notification pointed at.
+  useEffect(() => {
+    const taskId = pendingTaskIdRef.current
+    if (!taskId || tasks.length === 0) return
+
+    const target = tasks.find((task) => task.id === taskId)
+    pendingTaskIdRef.current = null
+    if (!target) return
+
+    setSelectedTask(target)
+    setReturnScreen("tasks")
+    setCurrentScreen("detail")
+  }, [tasks])
 
   // Subscribe to cloud tasks when user is signed in
   useEffect(() => {
@@ -152,6 +149,7 @@ export default function Page() {
           title: t.title,
           alarm: t.alarm,
           repeats: t.repeats,
+          repeatRule: t.repeatRule,
           dueDate: t.dueDate,
           completed: t.completed,
         }))
@@ -187,6 +185,16 @@ export default function Page() {
     }
   }, [user, authLoading])
 
+  // Alarms the worker judged too late to deliver. Reported once so a missed
+  // reminder is never silently dropped.
+  useEffect(() => {
+    if (!user) {
+      setMissedAlarms([])
+      return
+    }
+    return subscribeToMissedAlarms(user.uid, setMissedAlarms)
+  }, [user])
+
   // Keep the stored push endpoint fresh — iOS rotates endpoints, and the
   // worker can only reach devices it finds in Firestore.
   useEffect(() => {
@@ -199,6 +207,12 @@ export default function Page() {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'pushsubscriptionchange') {
         refreshPushSubscription(user.uid)
+      }
+
+      // Notification tapped while the app was already open.
+      if (event.data?.type === 'open-task' && typeof event.data.taskId === 'string') {
+        pendingTaskIdRef.current = event.data.taskId
+        setTasks((current) => [...current])
       }
     }
 
@@ -277,11 +291,12 @@ export default function Page() {
         }
         
         const created = await createCloudTask(user.uid, {
-          title: newTask.title || newTask.name,
+          title: newTask.title,
           detail: newTask.detail,
           photo: photoBase64,
           alarm: newTask.alarm,
           repeats: newTask.repeats,
+          repeatRule: newTask.repeatRule,
           dueDate: newTask.dueDate,
         })
         
@@ -292,6 +307,7 @@ export default function Page() {
             title: created.title,
             alarm: created.alarm,
             repeats: created.repeats,
+            repeatRule: created.repeatRule,
             dueDate: created.dueDate,
           })
           
@@ -300,6 +316,7 @@ export default function Page() {
             title: created.title,
             alarm: created.alarm,
             repeats: created.repeats,
+            repeatRule: created.repeatRule,
             dueDate: created.dueDate,
           })
         }
@@ -348,6 +365,7 @@ export default function Page() {
         title: task.title,
         alarm: task.alarm,
         repeats: task.repeats,
+        repeatRule: task.repeatRule,
         dueDate: task.dueDate,
       })
       startForegroundReminder({
@@ -355,6 +373,7 @@ export default function Page() {
         title: task.title,
         alarm: task.alarm,
         repeats: task.repeats,
+        repeatRule: task.repeatRule,
         dueDate: task.dueDate,
       })
     }
@@ -370,6 +389,7 @@ export default function Page() {
     if ('dueDate' in updates) storageUpdates.dueDate = updates.dueDate ?? null
     if ('alarm' in updates) storageUpdates.alarm = updates.alarm ?? null
     if ('repeats' in updates) storageUpdates.repeats = updates.repeats ?? null
+    if ('repeatRule' in updates) storageUpdates.repeatRule = updates.repeatRule ?? null
     
     await updateCloudTask(user.uid, taskId, storageUpdates)
     
@@ -378,6 +398,7 @@ export default function Page() {
     if (task) {
       const newAlarm = 'alarm' in updates ? updates.alarm : task.alarm
       const newRepeats = 'repeats' in updates ? updates.repeats : task.repeats
+      const newRepeatRule = 'repeatRule' in updates ? updates.repeatRule : task.repeatRule
       const newTitle = updates.title || task.title
       const newDueDate = 'dueDate' in updates ? updates.dueDate : task.dueDate
       
@@ -387,6 +408,7 @@ export default function Page() {
           title: newTitle,
           alarm: newAlarm,
           repeats: newRepeats,
+          repeatRule: newRepeatRule,
           dueDate: newDueDate,
         })
         startForegroundReminder({
@@ -394,6 +416,7 @@ export default function Page() {
           title: newTitle,
           alarm: newAlarm,
           repeats: newRepeats,
+          repeatRule: newRepeatRule,
           dueDate: newDueDate,
         })
       } else {
@@ -433,8 +456,47 @@ export default function Page() {
     return <LoadingScreen label="Synchronizing tasks" />
   }
 
+  const handleMissedAlarmClick = (missed: MissedAlarm) => {
+    const target = tasks.find((task) => task.id === missed.taskId)
+    if (!target) return
+    setReturnScreen("tasks")
+    setSelectedTask(target)
+    setCurrentScreen("detail")
+  }
+
   return (
     <div className="xp-app-shell">
+      {missedAlarms.length > 0 && (
+        <div className="xp-missed-alarms" role="status">
+          <div className="xp-missed-alarms-head">
+            <strong>
+              {missedAlarms.length === 1
+                ? "1 alarm was missed"
+                : `${missedAlarms.length} alarms were missed`}
+            </strong>
+            <button
+              type="button"
+              className="xp-button"
+              onClick={() => user && dismissMissedAlarms(user.uid)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <ul className="xp-missed-alarms-list">
+            {missedAlarms.slice(0, 5).map((missed) => (
+              <li key={missed.id}>
+                <button type="button" onClick={() => handleMissedAlarmClick(missed)}>
+                  <span className="xp-missed-alarm-title">{missed.title}</span>
+                  <span className="xp-missed-alarm-time">
+                    {new Date(missed.fireAt).toLocaleString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Drawer Overlay */}
       {drawerOpen && (
         <button
@@ -479,6 +541,7 @@ export default function Page() {
                 updatedAt: t.lastEditedDate.toISOString(),
                 alarm: t.alarm,
                 repeats: t.repeats,
+                repeatRule: t.repeatRule,
                 dueDate: t.dueDate,
               })))
             }}

@@ -2,7 +2,7 @@
 
 import { Bell, Calendar, Cloud, Download, LogOut, Shield, Upload, User } from "lucide-react"
 import { useEffect, useState } from "react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
 import { isWebNotificationSupported, requestWebNotificationPermission } from "@/lib/web-notifications"
 import {

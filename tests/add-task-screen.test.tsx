@@ -19,7 +19,7 @@ describe('AddTaskScreen', () => {
     await user.click(screen.getByRole('button', { name: /save task/i }))
 
     expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Untitled Task', name: 'Untitled Task' }),
+      expect.objectContaining({ title: 'Untitled Task' }),
       undefined,
     )
   })

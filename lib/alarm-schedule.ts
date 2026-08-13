@@ -5,17 +5,8 @@
 // timestamps and delivers a Web Push notification when they come due, which is
 // the only mechanism that works when an iOS PWA is backgrounded or closed.
 
+import { nextRepeatOccurrence, toRepeatRule, type RepeatRule } from './repeat-rule'
 import { parseAlarmTime, parseTaskDate } from './task-dates'
-
-export const DAY_NAME_TO_INDEX: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-}
 
 export interface AlarmTaskInput {
   id: string
@@ -23,21 +14,9 @@ export interface AlarmTaskInput {
   detail?: string
   alarm?: string
   repeats?: string
+  repeatRule?: RepeatRule
   dueDate?: string
   completed?: boolean
-}
-
-/** Parse a "Mon, Wed, Fri" repeat string into sorted weekday indexes (0 = Sunday). */
-export function parseRepeatDays(repeats?: string): number[] {
-  if (!repeats) return []
-
-  const days = repeats
-    .split(',')
-    .map((day) => day.trim())
-    .map((day) => DAY_NAME_TO_INDEX[day])
-    .filter((index): index is number => index !== undefined)
-
-  return Array.from(new Set(days)).sort((a, b) => a - b)
 }
 
 /**
@@ -52,21 +31,14 @@ export function getNextFireAt(task: AlarmTaskInput, now: Date = new Date()): num
   const time = parseAlarmTime(task.alarm)
   if (!time) return null
 
-  const repeatDays = parseRepeatDays(task.repeats)
+  const rule = toRepeatRule(task)
 
-  if (repeatDays.length > 0) {
-    // Repeating alarm: first matching weekday strictly in the future.
-    for (let offset = 0; offset <= 7; offset++) {
-      const candidate = new Date(now)
-      candidate.setDate(candidate.getDate() + offset)
-      candidate.setHours(time.hour, time.minute, 0, 0)
-
-      if (candidate.getTime() <= now.getTime()) continue
-      if (!repeatDays.includes(candidate.getDay())) continue
-
-      return candidate.getTime()
-    }
-    return null
+  if (rule.kind !== 'none') {
+    // Intervals count from the due date when there is one, so "every 2 weeks"
+    // lands on the weeks the user actually meant.
+    const anchor = task.dueDate ? parseTaskDate(task.dueDate) : undefined
+    const next = nextRepeatOccurrence(rule, time, now, anchor)
+    return next ? next.getTime() : null
   }
 
   // One-shot alarm: on the due date when there is one, otherwise today.

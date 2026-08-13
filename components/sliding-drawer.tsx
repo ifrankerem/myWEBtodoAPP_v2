@@ -1,6 +1,6 @@
 "use client"
 
-import type { Screen } from "@/app/page"
+import type { Screen } from "@/lib/task"
 import { Calendar, CheckCircle2, Cloud, ListTodo, Settings } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { ThemeToggle } from "@/components/xp-ui"

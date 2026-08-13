@@ -2,6 +2,7 @@
 // Stores tasks and photos as blobs for better performance
 
 import Dexie, { type Table } from 'dexie';
+import type { RepeatRule } from './repeat-rule';
 
 export interface TaskRecord {
   id: string;
@@ -12,7 +13,10 @@ export interface TaskRecord {
   createdAt: string;
   updatedAt: string;
   alarm?: string;
+  /** Legacy "Mon, Wed, Fri" string, kept so older clients and the .ics export still work. */
   repeats?: string;
+  /** Structured repeat, preferred over `repeats` when present. */
+  repeatRule?: RepeatRule;
   dueDate?: string;
   sortOrder?: number;
 }

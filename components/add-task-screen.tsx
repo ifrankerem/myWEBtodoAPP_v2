@@ -3,7 +3,9 @@
 import type React from "react"
 import { useState } from "react"
 import { Check, ImageIcon, X } from "lucide-react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
+import RepeatEditor from "@/components/repeat-editor"
+import { NO_REPEAT, toLegacyRepeats, type RepeatRule } from "@/lib/repeat-rule"
 import { compressImage } from "@/lib/storage-idb"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 
@@ -21,14 +23,8 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialD
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [alarmEnabled, setAlarmEnabled] = useState(false)
   const [alarmTime, setAlarmTime] = useState("12:00")
-  const [isRepetitive, setIsRepetitive] = useState(false)
-  const [selectedDays, setSelectedDays] = useState<string[]>([])
+  const [repeatRule, setRepeatRule] = useState<RepeatRule>(NO_REPEAT)
   const [dueDate, setDueDate] = useState(initialDueDate || "")
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-  const toggleDay = (day: string) => {
-    setSelectedDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])
-  }
 
   const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -45,13 +41,13 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialD
   const handleSave = () => {
     const normalizedTitle = title.trim() || "Untitled Task"
     const task: Omit<Task, "id" | "createdDate" | "lastEditedDate"> = {
-      name: normalizedTitle,
       title: normalizedTitle,
       type: photoFile ? "picture" : "text",
       photo: photoPreview || undefined,
       detail: detail || undefined,
       alarm: alarmEnabled ? alarmTime : undefined,
-      repeats: isRepetitive && selectedDays.length > 0 ? selectedDays.join(", ") : undefined,
+      repeats: toLegacyRepeats(repeatRule),
+      repeatRule,
       dueDate: dueDate || undefined,
     }
     onSave(task, photoFile || undefined)
@@ -109,17 +105,7 @@ export default function AddTaskScreen({ onSave, onCancel, onOpenDrawer, initialD
                 </label>
                 <input aria-label="Alarm time" type="time" value={alarmTime} onChange={(event) => setAlarmTime(event.target.value)} disabled={!alarmEnabled} />
               </div>
-              <label className="xp-checkbox-label">
-                <input type="checkbox" checked={isRepetitive} onChange={(event) => setIsRepetitive(event.target.checked)} />
-                Repeat on selected days
-              </label>
-              {isRepetitive && (
-                <div className="xp-day-picker" aria-label="Repeat days">
-                  {days.map((day) => (
-                    <button key={day} type="button" className="xp-button" aria-pressed={selectedDays.includes(day)} onClick={() => toggleDay(day)}>{day}</button>
-                  ))}
-                </div>
-              )}
+              <RepeatEditor value={repeatRule} onChange={setRepeatRule} idPrefix="add-task" />
             </div>
           </section>
         </div>

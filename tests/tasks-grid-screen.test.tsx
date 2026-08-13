@@ -2,11 +2,10 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import TasksGridScreen from '@/components/tasks-grid-screen'
-import type { Task } from '@/app/page'
+import type { Task } from '@/lib/task'
 
 const task: Task = {
   id: 'task-1',
-  name: 'Write tests',
   title: 'Write tests',
   type: 'text',
   createdDate: new Date('2026-08-05T10:00:00Z'),

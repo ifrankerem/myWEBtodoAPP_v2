@@ -3,7 +3,15 @@
 import { CheckCircle, Pencil, X, Trash2, Check, ImageIcon } from "lucide-react"
 import type React from "react"
 import { useState } from "react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
+import RepeatEditor from "@/components/repeat-editor"
+import {
+  describeRepeatRule,
+  isRepeating,
+  toLegacyRepeats,
+  toRepeatRule,
+  type RepeatRule,
+} from "@/lib/repeat-rule"
 import { compressImage } from "@/lib/storage-idb"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 import { parseTaskDate } from "@/lib/task-dates"
@@ -31,17 +39,14 @@ export default function TaskDetailScreen({
   const [isEditing, setIsEditing] = useState(false)
   
   // Edit form state
-  const [editTitle, setEditTitle] = useState(task.title || task.name)
+  const [editTitle, setEditTitle] = useState(task.title)
   const [editDetail, setEditDetail] = useState(task.detail || "")
   const [editDueDate, setEditDueDate] = useState(task.dueDate || "")
   const [editAlarm, setEditAlarm] = useState(task.alarm || "")
   const [editAlarmEnabled, setEditAlarmEnabled] = useState(!!task.alarm)
-  const [editRepeats, setEditRepeats] = useState(task.repeats?.split(", ") || [])
-  const [editIsRepetitive, setEditIsRepetitive] = useState(!!task.repeats)
+  const [editRepeatRule, setEditRepeatRule] = useState<RepeatRule>(toRepeatRule(task))
   const [editPhoto, setEditPhoto] = useState<string | undefined>(task.photo || undefined)
   const [photoRemoved, setPhotoRemoved] = useState(false)
-
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString("en-US", {
@@ -49,12 +54,6 @@ export default function TaskDetailScreen({
       day: "numeric",
       year: "numeric",
     })
-  }
-
-  const toggleDay = (day: string) => {
-    setEditRepeats(prev => 
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
-    )
   }
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -137,11 +136,11 @@ export default function TaskDetailScreen({
       const normalizedTitle = editTitle.trim() || "Untitled Task"
       onUpdateTask(task.id, {
         title: normalizedTitle,
-        name: normalizedTitle,
         detail: editDetail || undefined,
         dueDate: editDueDate || undefined,
         alarm: editAlarmEnabled && editAlarm ? editAlarm : undefined,
-        repeats: editIsRepetitive && editRepeats.length > 0 ? editRepeats.join(", ") : undefined,
+        repeats: toLegacyRepeats(editRepeatRule),
+        repeatRule: editRepeatRule,
         photo: photoRemoved ? null : editPhoto,
         type: editPhoto ? "picture" : "text",
       })
@@ -151,13 +150,12 @@ export default function TaskDetailScreen({
 
   const handleCancelEdit = () => {
     // Reset to original values
-    setEditTitle(task.title || task.name)
+    setEditTitle(task.title)
     setEditDetail(task.detail || "")
     setEditDueDate(task.dueDate || "")
     setEditAlarm(task.alarm || "")
     setEditAlarmEnabled(!!task.alarm)
-    setEditRepeats(task.repeats?.split(", ") || [])
-    setEditIsRepetitive(!!task.repeats)
+    setEditRepeatRule(toRepeatRule(task))
     setEditPhoto(task.photo || undefined)
     setPhotoRemoved(false)
     setIsEditing(false)
@@ -196,8 +194,7 @@ export default function TaskDetailScreen({
                     <label className="xp-checkbox-label"><input type="checkbox" checked={editAlarmEnabled} onChange={(event) => setEditAlarmEnabled(event.target.checked)} /> Enable alarm</label>
                     <input aria-label="Alarm time" type="time" value={editAlarm} onChange={(event) => setEditAlarm(event.target.value)} disabled={!editAlarmEnabled} />
                   </div>
-                  <label className="xp-checkbox-label"><input type="checkbox" checked={editIsRepetitive} onChange={(event) => setEditIsRepetitive(event.target.checked)} /> Repeat on selected days</label>
-                  {editIsRepetitive && <div className="xp-day-picker">{days.map((day) => <button key={day} type="button" className="xp-button" aria-pressed={editRepeats.includes(day)} onClick={() => toggleDay(day)}>{day}</button>)}</div>}
+                  <RepeatEditor value={editRepeatRule} onChange={setEditRepeatRule} idPrefix="task-detail" />
                 </div>
               </section>
             </>
@@ -206,9 +203,9 @@ export default function TaskDetailScreen({
               <section className="xp-groupbox">
                 <span className="xp-groupbox-title">Task</span>
                 <div className="xp-detail-layout">
-                  {task.photo && <button type="button" className="xp-detail-photo" onClick={() => setLightboxOpen(true)}><img src={task.photo} alt={task.name} /></button>}
+                  {task.photo && <button type="button" className="xp-detail-photo" onClick={() => setLightboxOpen(true)}><img src={task.photo} alt={task.title} /></button>}
                   <div>
-                    <h2 className="xp-detail-title">{task.title || task.name}</h2>
+                    <h2 className="xp-detail-title">{task.title}</h2>
                     <p className="xp-detail-copy">{task.detail || "No details were added to this task."}</p>
                   </div>
                 </div>
@@ -229,7 +226,7 @@ export default function TaskDetailScreen({
                   <div><dt>Last edited</dt><dd>{formatDate(task.lastEditedDate)}</dd></div>
                   {task.dueDate && <div><dt>Due date</dt><dd>{parseTaskDate(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</dd></div>}
                   {task.alarm && <div><dt>Alarm</dt><dd>{task.alarm}</dd></div>}
-                  {task.repeats && <div><dt>Repeats</dt><dd>{task.repeats}</dd></div>}
+                  {isRepeating(toRepeatRule(task)) && <div><dt>Repeats</dt><dd>{describeRepeatRule(toRepeatRule(task))}</dd></div>}
                 </dl>
               </section>
             </>
@@ -250,7 +247,7 @@ export default function TaskDetailScreen({
         <div className="xp-modal-backdrop" onClick={() => setLightboxOpen(false)}>
           <div className="xp-dialog" role="dialog" aria-modal="true" aria-label={`${task.title} picture`} onClick={(event) => event.stopPropagation()}>
             <div className="xp-titlebar"><div className="xp-titlebar-caption">{task.title}</div><button type="button" className="xp-dialog-close" onClick={() => setLightboxOpen(false)} aria-label="Close"><X /></button></div>
-            <div className="xp-dialog-body"><img src={task.photo} alt={task.name} className="max-w-[90vw] max-h-[76vh] object-contain" /></div>
+            <div className="xp-dialog-body"><img src={task.photo} alt={task.title} className="max-w-[90vw] max-h-[76vh] object-contain" /></div>
             <div className="xp-actionbar"><button type="button" className="xp-button" onClick={() => setLightboxOpen(false)}>Close</button></div>
           </div>
         </div>

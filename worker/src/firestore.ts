@@ -244,6 +244,37 @@ export class FirestoreClient {
     }
   }
 
+  /**
+   * Record an alarm that was too late to deliver, so the app can surface it on
+   * next open. The document id is derived from the task and its fire time, so
+   * a retry cannot create duplicates.
+   */
+  async recordMissedAlarm(
+    uid: string,
+    missed: { taskId: string; title: string; fireAt: number; noticedAt: number }
+  ): Promise<void> {
+    const id = `${missed.taskId || 'unknown'}__${Math.round(missed.fireAt)}`
+
+    const response = await this.request(
+      `/users/${encodeURIComponent(uid)}/missedAlarms/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          fields: {
+            taskId: { stringValue: missed.taskId },
+            title: { stringValue: missed.title },
+            fireAt: { integerValue: String(Math.round(missed.fireAt)) },
+            noticedAt: { integerValue: String(Math.round(missed.noticedAt)) },
+          },
+        }),
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`recordMissedAlarm failed (${response.status})`)
+    }
+  }
+
   async deletePushSubscription(uid: string, subscriptionId: string): Promise<void> {
     await this.request(
       `/users/${encodeURIComponent(uid)}/pushSubscriptions/${encodeURIComponent(subscriptionId)}`,

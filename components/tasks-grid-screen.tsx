@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from "lucide-react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 import {
   DndContext,

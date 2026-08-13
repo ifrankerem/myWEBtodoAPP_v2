@@ -1,9 +1,18 @@
 // Timezone-aware re-arming of repeating alarms.
 //
-// The client stores an absolute `fireAt` plus the IANA timezone the alarm was
-// created in. After a repeating alarm fires the worker computes the next
-// occurrence itself, so repeats keep working even if the user never reopens
-// the app.
+// The client stores an absolute `fireAt`, the structured repeat rule, and the
+// IANA timezone the alarm was created in. After a repeating alarm fires the
+// worker computes the next occurrence itself, so repeats keep working even if
+// the user never reopens the app.
+//
+// This mirrors lib/repeat-rule.ts, but every date calculation is done in the
+// alarm's own timezone rather than the runtime's (which is always UTC here).
+
+export type RepeatRule =
+  | { kind: 'none' }
+  | { kind: 'daily'; interval: number }
+  | { kind: 'weekly'; days: number[]; interval: number }
+  | { kind: 'monthly'; dayOfMonth: number }
 
 const DAY_NAME_TO_INDEX: Record<string, number> = {
   Sun: 0,
@@ -15,24 +24,58 @@ const DAY_NAME_TO_INDEX: Record<string, number> = {
   Sat: 6,
 }
 
-const WEEKDAY_FORMAT_TO_INDEX: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000
+
+function clampInterval(value: unknown): number {
+  const interval = Math.trunc(Number(value))
+  return Number.isFinite(interval) && interval >= 1 ? Math.min(interval, 52) : 1
 }
 
-export function parseRepeatDays(repeats: string | null | undefined): number[] {
-  if (!repeats) return []
-  const days = repeats
-    .split(',')
-    .map((day) => day.trim())
-    .map((day) => DAY_NAME_TO_INDEX[day])
-    .filter((index): index is number => index !== undefined)
+function normalizeDays(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  const days = value
+    .map((day) => Math.trunc(Number(day)))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
   return Array.from(new Set(days)).sort((a, b) => a - b)
+}
+
+export function parseLegacyRepeats(repeats: string | null | undefined): number[] {
+  if (!repeats) return []
+  return normalizeDays(
+    repeats
+      .split(',')
+      .map((day) => DAY_NAME_TO_INDEX[day.trim()])
+      .filter((day) => day !== undefined)
+  )
+}
+
+/** Read the rule from an alarm document, falling back to the legacy string. */
+export function toRepeatRule(source: {
+  repeatRule?: unknown
+  repeats?: string | null
+}): RepeatRule {
+  const raw = source.repeatRule
+
+  if (raw && typeof raw === 'object') {
+    const rule = raw as Record<string, unknown>
+
+    if (rule.kind === 'daily') return { kind: 'daily', interval: clampInterval(rule.interval) }
+
+    if (rule.kind === 'weekly') {
+      const days = normalizeDays(rule.days)
+      if (days.length > 0) {
+        return { kind: 'weekly', days, interval: clampInterval(rule.interval) }
+      }
+    }
+
+    if (rule.kind === 'monthly') {
+      const dayOfMonth = Math.trunc(Number(rule.dayOfMonth))
+      if (dayOfMonth >= 1 && dayOfMonth <= 31) return { kind: 'monthly', dayOfMonth }
+    }
+  }
+
+  const legacyDays = parseLegacyRepeats(source.repeats)
+  return legacyDays.length > 0 ? { kind: 'weekly', days: legacyDays, interval: 1 } : { kind: 'none' }
 }
 
 export function parseAlarmTime(value: string): { hour: number; minute: number } | null {
@@ -88,7 +131,7 @@ function getZonedParts(timestamp: number, tz: string): ZonedParts {
     hour: Number(map.hour),
     minute: Number(map.minute),
     second: Number(map.second),
-    weekday: WEEKDAY_FORMAT_TO_INDEX[map.weekday] ?? 0,
+    weekday: DAY_NAME_TO_INDEX[map.weekday] ?? 0,
   }
 }
 
@@ -118,8 +161,51 @@ export function zonedTimeToEpoch(
   const naive = Date.UTC(year, month - 1, day, hour, minute)
   const firstGuess = naive - timeZoneOffsetMs(naive, tz)
   // A second pass corrects the guess when the offset changes across the boundary.
-  const refined = naive - timeZoneOffsetMs(firstGuess, tz)
-  return refined
+  return naive - timeZoneOffsetMs(firstGuess, tz)
+}
+
+/** Whole days between two calendar dates, expressed as UTC day numbers. */
+function dayNumber(year: number, month: number, day: number): number {
+  return Math.round(Date.UTC(year, month - 1, day) / MILLIS_PER_DAY)
+}
+
+function lastDayOfMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+function matchesRule(
+  rule: RepeatRule,
+  candidate: { year: number; month: number; day: number; weekday: number },
+  anchorDayNumber: number | null
+): boolean {
+  const candidateDayNumber = dayNumber(candidate.year, candidate.month, candidate.day)
+
+  switch (rule.kind) {
+    case 'none':
+      return false
+
+    case 'daily': {
+      if (rule.interval === 1) return true
+      if (anchorDayNumber === null) return true
+      const elapsed = candidateDayNumber - anchorDayNumber
+      return elapsed >= 0 && elapsed % rule.interval === 0
+    }
+
+    case 'weekly': {
+      if (!rule.days.includes(candidate.weekday)) return false
+      if (rule.interval === 1 || anchorDayNumber === null) return rule.interval === 1
+      // Count whole weeks from the start of the anchor's week so every selected
+      // day inside a matching week fires.
+      const weeks = Math.floor((candidateDayNumber - anchorDayNumber) / 7)
+      return weeks >= 0 && weeks % rule.interval === 0
+    }
+
+    case 'monthly':
+      // Clamp so "day 31" still fires in short months.
+      return (
+        candidate.day === Math.min(rule.dayOfMonth, lastDayOfMonth(candidate.year, candidate.month))
+      )
+  }
 }
 
 /**
@@ -127,34 +213,63 @@ export function zonedTimeToEpoch(
  * Returns null when the alarm does not repeat or cannot be parsed.
  */
 export function getNextRepeatFireAt(
-  alarm: { alarm: string; repeats: string | null; tz: string | null },
+  alarm: {
+    alarm: string
+    repeats?: string | null
+    repeatRule?: unknown
+    dueDate?: string | null
+    tz: string | null
+  },
   after: number
 ): number | null {
-  const repeatDays = parseRepeatDays(alarm.repeats)
-  if (repeatDays.length === 0) return null
+  const rule = toRepeatRule(alarm)
+  if (rule.kind === 'none') return null
 
   const time = parseAlarmTime(alarm.alarm)
   if (!time) return null
 
   const tz = safeTimeZone(alarm.tz)
-  const startOfSearch = getZonedParts(after, tz)
+  const start = getZonedParts(after, tz)
 
-  for (let offset = 0; offset <= 8; offset++) {
-    // Step day-by-day in the target timezone via UTC arithmetic on the date parts.
-    const dayCursor = new Date(
-      Date.UTC(startOfSearch.year, startOfSearch.month - 1, startOfSearch.day + offset)
-    )
+  // Intervals count from the due date when there is one, matching the client.
+  let anchorDayNumber: number | null = null
+  if (alarm.dueDate) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(alarm.dueDate)
+    if (match) {
+      const anchor = dayNumber(Number(match[1]), Number(match[2]), Number(match[3]))
+      // Weekly intervals are measured from the start of the anchor's week.
+      anchorDayNumber =
+        rule.kind === 'weekly'
+          ? anchor - ((new Date(anchor * MILLIS_PER_DAY).getUTCDay() + 7) % 7)
+          : anchor
+    }
+  }
+
+  // A monthly rule can be up to ~13 months out once intervals are involved.
+  const horizon =
+    rule.kind === 'monthly' ? 400 : rule.kind === 'weekly' ? rule.interval * 7 + 7 : rule.interval + 1
+
+  for (let offset = 0; offset <= horizon; offset++) {
+    const cursor = new Date(Date.UTC(start.year, start.month - 1, start.day + offset))
+    const candidateDate = {
+      year: cursor.getUTCFullYear(),
+      month: cursor.getUTCMonth() + 1,
+      day: cursor.getUTCDate(),
+    }
+
     const candidate = zonedTimeToEpoch(
-      dayCursor.getUTCFullYear(),
-      dayCursor.getUTCMonth() + 1,
-      dayCursor.getUTCDate(),
+      candidateDate.year,
+      candidateDate.month,
+      candidateDate.day,
       time.hour,
       time.minute,
       tz
     )
 
     if (candidate <= after) continue
-    if (!repeatDays.includes(getZonedParts(candidate, tz).weekday)) continue
+    if (!matchesRule(rule, { ...candidateDate, weekday: getZonedParts(candidate, tz).weekday }, anchorDayNumber)) {
+      continue
+    }
     return candidate
   }
 

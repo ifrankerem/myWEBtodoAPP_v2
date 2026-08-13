@@ -2,8 +2,9 @@
 
 import { ArrowRight, Bell, CalendarDays, ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Repeat } from "lucide-react"
 import { useEffect, useState } from "react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
+import { isRepeating, ruleOccursOnDate, toRepeatRule } from "@/lib/repeat-rule"
 import { parseTaskDate } from "@/lib/task-dates"
 
 interface CalendarScreenProps {
@@ -58,7 +59,6 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
 
   const getTasksForDay = (day: number) => {
     const dateToCheck = new Date(year, month, day)
-    const dayName = daysOfWeek[dateToCheck.getDay()]
 
     return tasks
       .filter((task) => !task.completed)
@@ -67,11 +67,17 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
           const dueDate = parseTaskDate(task.dueDate)
           if (dueDate.getDate() === day && dueDate.getMonth() === month && dueDate.getFullYear() === year) return true
         }
-        if (task.repeats?.split(",").map((item) => item.trim()).includes(dayName)) return true
+
+        const rule = toRepeatRule(task)
+        if (isRepeating(rule)) {
+          const anchor = task.dueDate ? parseTaskDate(task.dueDate) : undefined
+          if (ruleOccursOnDate(rule, dateToCheck, anchor)) return true
+        }
+
         return Boolean(
           task.alarm &&
           !task.dueDate &&
-          !task.repeats &&
+          !isRepeating(rule) &&
           day === today.getDate() &&
           month === today.getMonth() &&
           year === today.getFullYear(),
@@ -82,7 +88,7 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
         return {
           ...task,
           hasAlarm: Boolean(task.alarm),
-          hasRepeat: Boolean(task.repeats),
+          hasRepeat: isRepeating(toRepeatRule(task)),
           isDueDate: Boolean(
             dueDate &&
             dueDate.getDate() === day &&
@@ -159,7 +165,7 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
         {selectedDateTasks.length > 0 ? selectedDateTasks.map((task, index) => (
           <button key={task.id} type="button" className="xp-calendar-task-row" onClick={() => onSelectTask?.(task)}>
             <span className="xp-calendar-task-index">{index + 1}.</span>
-            <span className="xp-calendar-task-name">{task.title || task.name}</span>
+            <span className="xp-calendar-task-name">{task.title}</span>
             {task.hasAlarm && <span className="xp-calendar-meta"><Bell /> {task.alarm}</span>}
             {task.hasRepeat && <Repeat className="xp-calendar-repeat" aria-label="Repeating task" />}
             {task.isDueDate && <span className="xp-badge xp-badge-danger">Due</span>}
@@ -230,8 +236,8 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
                                 <button type="button" className="xp-schedule-date" onClick={() => setSelectedDate(day)} aria-label={`Select ${monthNames[month]} ${day}`}>{day}</button>
                                 <div className="xp-schedule-tasks">
                                   {getTasksForDay(day).slice(0, 4).map((task) => (
-                                    <button key={task.id} type="button" className="xp-schedule-task" onClick={() => onSelectTask?.(task)} title={task.title || task.name}>
-                                      {task.alarm && <span>{task.alarm}</span>} {task.title || task.name}
+                                    <button key={task.id} type="button" className="xp-schedule-task" onClick={() => onSelectTask?.(task)} title={task.title}>
+                                      {task.alarm && <span>{task.alarm}</span>} {task.title}
                                     </button>
                                   ))}
                                   {getTasksForDay(day).length > 4 && <small>+{getTasksForDay(day).length - 4} more</small>}
@@ -255,7 +261,7 @@ export default function CalendarScreen({ tasks, onOpenDrawer, onSelectTask, onAd
               <div className="xp-inset xp-upcoming-list">
                 {upcomingTasks.map((task) => (
                   <button key={task.id} type="button" className="xp-upcoming-row" onClick={() => onSelectTask?.(task)}>
-                    <span>{task.title || task.name}</span>
+                    <span>{task.title}</span>
                     <span className={`xp-badge ${dueDateTone(task.dueDate!)}`}>{dueDateLabel(task.dueDate!)}</span>
                   </button>
                 ))}
