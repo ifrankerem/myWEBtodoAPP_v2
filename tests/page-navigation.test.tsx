@@ -27,6 +27,7 @@ vi.mock('@/lib/storage-cloud', () => ({
 
 vi.mock('@/lib/notifications', () => ({
   initializeNotifications: vi.fn(),
+  onAlarmNotificationTap: vi.fn(() => () => {}),
   scheduleTaskNotification: vi.fn(),
   cancelTaskNotification: vi.fn(),
 }))

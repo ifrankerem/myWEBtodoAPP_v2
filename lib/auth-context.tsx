@@ -7,9 +7,12 @@ import {
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
+  signInWithCredential,
   signInWithPopup,
   type User,
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { FirebaseError } from 'firebase/app';
 import { getAuthInstance } from './firebase';
 
@@ -66,12 +69,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       setError(null);
+      if (Capacitor.isNativePlatform()) {
+        // Popups do not work in the WebView: the native Google account picker
+        // produces an ID token, and the JS SDK signs in with it.
+        const result = await FirebaseAuthentication.signInWithGoogle();
+        const idToken = result.credential?.idToken;
+        if (!idToken) throw new Error('Google sign-in returned no ID token');
+        await signInWithCredential(getAuthInstance(), GoogleAuthProvider.credential(idToken));
+        return;
+      }
       const provider = new GoogleAuthProvider();
       await signInWithPopup(getAuthInstance(), provider);
     } catch (err: unknown) {
       const code = getAuthErrorCode(err);
-      if (code === 'auth/popup-closed-by-user') return;
-      const message = getAuthErrorMessage(code);
+      if (code === 'auth/popup-closed-by-user' || isNativeSignInCancel(err)) return;
+      // "[16] Account reauth failed" / "[10]": the signing key's SHA-1 is not
+      // registered for this app in Firebase, so Google rejects the credential.
+      const message = /\[(10|16)\]/.test(err instanceof Error ? err.message : '')
+        ? 'Google sign-in is not configured for this build. Use email and password.'
+        : getAuthErrorMessage(code);
       setError(message);
       throw err;
     }
@@ -81,6 +97,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setError(null);
       await firebaseSignOut(getAuthInstance());
+      if (Capacitor.isNativePlatform()) {
+        // Clear the cached Google account so the picker shows again next time.
+        await FirebaseAuthentication.signOut().catch(() => {});
+      }
     } catch (err: unknown) {
       setError('Failed to sign out. Please try again.');
       throw err;
@@ -102,6 +122,10 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+function isNativeSignInCancel(error: unknown): boolean {
+  return error instanceof Error && /cancel/i.test(error.message);
 }
 
 function getAuthErrorCode(error: unknown): string {

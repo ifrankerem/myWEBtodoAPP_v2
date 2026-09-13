@@ -36,7 +36,6 @@ async function createAlarmChannel(): Promise<void> {
       description: 'Alarm notifications for your tasks',
       importance: 5, // Max importance (IMPORTANCE_HIGH) - makes sound and shows heads-up
       visibility: 1, // Public - show on lock screen
-      sound: 'alarm_sound.wav', // Custom alarm sound
       vibration: true,
       lights: true,
       lightColor: '#00FF88',
@@ -47,6 +46,44 @@ async function createAlarmChannel(): Promise<void> {
   } catch (error) {
     console.error('Error creating alarm channel:', error);
   }
+}
+
+// Android 12+ gates exact alarms behind a special permission. The manifest
+// declares USE_EXACT_ALARM, which Android 13+ grants automatically; Android 12
+// still needs the user to allow it once (see openExactAlarmSettings).
+export async function canScheduleExactAlarms(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return true;
+
+  try {
+    const { exact_alarm } = await LocalNotifications.checkExactNotificationSetting();
+    return exact_alarm === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+export async function openExactAlarmSettings(): Promise<boolean> {
+  const { exact_alarm } = await LocalNotifications.changeExactNotificationSetting();
+  return exact_alarm === 'granted';
+}
+
+export async function checkNativeNotificationPermission(): Promise<'granted' | 'denied' | 'prompt'> {
+  const { display } = await LocalNotifications.checkPermissions();
+  return display === 'granted' || display === 'denied' ? display : 'prompt';
+}
+
+/** Open the task a tapped alarm notification points at. Returns an unsubscribe. */
+export function onAlarmNotificationTap(openTask: (taskId: string) => void): () => void {
+  if (!Capacitor.isNativePlatform()) return () => {};
+
+  const handle = LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+    const taskId = action.notification.extra?.taskId;
+    if (typeof taskId === 'string') openTask(taskId);
+  });
+
+  return () => {
+    handle.then((listener) => listener.remove());
+  };
 }
 
 // Request notification permissions
@@ -111,11 +148,16 @@ export async function scheduleTaskNotification(task: AlarmTaskInput): Promise<vo
     title: '🔔 ALARM',
     body: task.title,
     channelId: ALARM_CHANNEL_ID,
-    sound: 'alarm_sound.wav',
-    smallIcon: 'ic_launcher',
+    smallIcon: 'ic_stat_task',
     largeIcon: 'ic_launcher',
     ongoing: true, // Makes notification persistent until dismissed
     autoCancel: false, // Don't auto-dismiss when tapped
+    foreground: true,
+    // Read back by the tap listener to open the task.
+    extra: { taskId: task.id },
+    // Checked up front: schedule() would otherwise open the system
+    // "Alarms & reminders" screen on every reschedule while it is denied.
+    isExactNotification: await canScheduleExactAlarms(),
   } as const;
 
   if (rule.kind === 'weekly' && rule.interval === 1) {

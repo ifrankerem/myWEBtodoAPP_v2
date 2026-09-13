@@ -23,6 +23,7 @@ import {
 } from "@/lib/storage-cloud"
 import {
   initializeNotifications,
+  onAlarmNotificationTap,
   scheduleTaskNotification,
   cancelTaskNotification,
 } from "@/lib/notifications"
@@ -87,6 +88,15 @@ export default function Page() {
     const url = new URL(window.location.href)
     url.searchParams.delete("task")
     window.history.replaceState({}, "", url.pathname + url.search + url.hash)
+  }, [])
+
+  // Native alarm tapped. Cold starts deliver this before tasks load, so it
+  // goes through the same pending ref as the ?task= deep link.
+  useEffect(() => {
+    return onAlarmNotificationTap((taskId) => {
+      pendingTaskIdRef.current = taskId
+      setTasks((current) => [...current])
+    })
   }, [])
 
   // Once tasks are loaded, open the one the notification pointed at.

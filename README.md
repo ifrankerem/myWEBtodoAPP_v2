@@ -150,22 +150,31 @@ This project uses **Capacitor** for native Android/iOS builds.
 
 ### Android Build
 
-1. Initialize Capacitor (first time only):
-   ```bash
-   npx cap init
-   npx cap add android
-   ```
+The `android/` project is committed. Toolchain: JDK 21 and the Android SDK
+(platform 36). Point Gradle at them with `JAVA_HOME` and `android/local.properties`
+(`sdk.dir=...`).
 
-2. Build and sync:
-   ```bash
-   npm run build
-   npx cap sync android
-   ```
+One-time Firebase setup:
 
-3. Open in Android Studio:
-   ```bash
-   npx cap open android
-   ```
+1. `.env.local` must contain the `NEXT_PUBLIC_FIREBASE_*` values — the static
+   export bakes them into the APK (`npx vercel env pull .env.local` copies them
+   from Vercel).
+2. In the Firebase console, add an Android app with package name
+   `com.ifrankerem.taskmanager` and the SHA-1 of the signing key
+   (`keytool -list -v -keystore ~/.android/debug.keystore -storepass android`).
+3. Download `google-services.json` to `android/app/` (gitignored). Native
+   Google sign-in needs it.
+
+Build a debug APK:
+
+```bash
+JAVA_HOME=~/Android/jdk21 npm run android:apk
+# android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+On Android, alarms are scheduled with the OS alarm manager (Local
+Notifications) and ring with the app closed; Web Push is web-only. Backup and
+`.ics` exports open the system share sheet.
 
 ### iOS Build (macOS required)
 

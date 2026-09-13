@@ -4,6 +4,7 @@ import { Bell, Calendar, Cloud, Download, LogOut, Shield, Upload, User } from "l
 import { useEffect, useState } from "react"
 import type { Task } from "@/lib/task"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
+import { saveTextFile } from "@/lib/save-file"
 import { isWebNotificationSupported, requestWebNotificationPermission } from "@/lib/web-notifications"
 import {
   disablePush,
@@ -13,6 +14,13 @@ import {
   type PushBlockReason,
 } from "@/lib/push-subscription"
 import { useAuth } from "@/lib/auth-context"
+import { Capacitor } from "@capacitor/core"
+import {
+  canScheduleExactAlarms,
+  checkNativeNotificationPermission,
+  openExactAlarmSettings,
+  requestNotificationPermissions,
+} from "@/lib/notifications"
 import { createCloudTask } from "@/lib/storage-cloud"
 import { XpHeader, XpStatusBar } from "@/components/xp-ui"
 
@@ -45,6 +53,62 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
+type NativeAlarmStatus = {
+  permission: "granted" | "denied" | "prompt"
+  exact: boolean
+}
+
+// The Android app schedules alarms with the OS alarm manager, so the Web Push
+// and web notification controls do not apply. This shows what the OS allows.
+function NativeAlarmSettings() {
+  const [status, setStatus] = useState<NativeAlarmStatus | null>(null)
+
+  const refresh = async () => {
+    const [permission, exact] = await Promise.all([checkNativeNotificationPermission(), canScheduleExactAlarms()])
+    setStatus({ permission, exact })
+  }
+
+  useEffect(() => {
+    refresh().catch((error) => console.error("Could not read alarm permissions:", error))
+  }, [])
+
+  const handleAllowNotifications = async () => {
+    await requestNotificationPermissions()
+    await refresh()
+  }
+
+  const handleAllowExact = async () => {
+    await openExactAlarmSettings().catch(() => false)
+    await refresh()
+  }
+
+  const notificationCopy = status === null
+    ? "Checking this device..."
+    : status.permission === "granted"
+      ? "On — alarms ring even when the app is closed."
+      : status.permission === "denied"
+        ? "Blocked — enable notifications for Task Manager in Android settings."
+        : "Allow notifications so alarms can ring."
+
+  return (
+    <>
+      <div className="xp-settings-row">
+        <div><strong>Alarm Notifications</strong><p>{notificationCopy}</p></div>
+        {status?.permission === "granted" && <span className="xp-badge xp-badge-success">On</span>}
+        {status?.permission === "prompt" && <button type="button" className="xp-button" onClick={handleAllowNotifications}>Allow</button>}
+      </div>
+      <div className="xp-settings-row">
+        <div>
+          <strong>Exact Alarm Timing</strong>
+          <p>{status === null ? "Checking..." : status.exact ? "Alarms fire on the exact minute." : "Off — Android may delay alarms by several minutes."}</p>
+        </div>
+        {status?.exact && <span className="xp-badge xp-badge-success">On</span>}
+        {status && !status.exact && <button type="button" className="xp-button" onClick={handleAllowExact}>Allow</button>}
+      </div>
+    </>
+  )
+}
+
 export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImported }: SettingsScreenProps) {
   const { user, signOut } = useAuth()
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking")
@@ -59,6 +123,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
   }, [])
 
   useEffect(() => {
+    if (Capacitor.isNativePlatform()) return
     let cancelled = false
 
     const environment = getPushEnvironment()
@@ -93,17 +158,13 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     }
   }
 
-  const handleExportData = () => {
+  const handleExportData = async () => {
     try {
-      const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `task-manager-backup-${new Date().toISOString().split("T")[0]}.json`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      await saveTextFile(
+        `task-manager-backup-${new Date().toISOString().split("T")[0]}.json`,
+        JSON.stringify(tasks, null, 2),
+        "application/json",
+      )
     } catch (error) {
       console.error("Export failed:", error)
       showResult({ success: false, message: "Could not export the backup." })
@@ -159,22 +220,27 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     input.click()
   }
 
-  const handleExportCalendar = () => {
+  const handleExportCalendar = async () => {
     const tasksWithAlarms = tasks.filter((task) => task.alarm && !task.completed)
     if (tasksWithAlarms.length === 0) {
       showResult({ success: false, message: "No tasks with alarms to export." })
       return
     }
 
-    exportAllAlarmsToICS(tasksWithAlarms.map((task) => ({
-      id: task.id,
-      title: task.title,
-      description: task.detail,
-      alarm: task.alarm!,
-      repeats: task.repeats,
-      dueDate: task.dueDate,
-    })))
-    showResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
+    try {
+      await exportAllAlarmsToICS(tasksWithAlarms.map((task) => ({
+        id: task.id,
+        title: task.title,
+        description: task.detail,
+        alarm: task.alarm!,
+        repeats: task.repeats,
+        dueDate: task.dueDate,
+      })))
+      showResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
+    } catch (error) {
+      console.error("Calendar export failed:", error)
+      showResult({ success: false, message: "Could not export the calendar file." })
+    }
   }
 
   const handleRequestNotifications = async () => {
@@ -254,6 +320,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
 
           <section className="xp-groupbox">
             <span className="xp-groupbox-title"><Bell /> Notifications</span>
+            {Capacitor.isNativePlatform() ? <NativeAlarmSettings /> : <>
             <div className="xp-settings-row">
               <div><strong>Background Alarms</strong><p>{pushCopy}</p></div>
               {pushState === "on" && <span className="xp-badge xp-badge-success">On</span>}
@@ -281,6 +348,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
               {notificationStatus !== "checking" && notificationStatus !== "not-supported" && notificationStatus !== "granted" && <button type="button" className="xp-button" onClick={handleRequestNotifications}>Enable</button>}
               {notificationStatus === "granted" && <span className="xp-badge xp-badge-success">Enabled</span>}
             </div>
+            </>}
           </section>
 
           <section className="xp-groupbox">
