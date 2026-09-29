@@ -22,6 +22,8 @@ const KIND_LABELS: Array<{ kind: RepeatKind; label: string }> = [
   { kind: "monthly", label: "Monthly" },
 ]
 
+const DAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
 /** Sensible starting rule when the user switches repeat kind. */
 function defaultRuleFor(kind: RepeatKind, previous: RepeatRule): RepeatRule {
   switch (kind) {
@@ -53,9 +55,10 @@ export default function RepeatEditor({ value, onChange, idPrefix }: RepeatEditor
   }
 
   return (
-    <div className="xp-repeat-editor">
-      <div className="xp-field">
-        <label htmlFor={`${idPrefix}-repeat-kind`}>Repeat</label>
+    <fieldset className="xp-groupbox">
+      <legend>Repeat</legend>
+      <div className="xp-prow">
+        <label htmlFor={`${idPrefix}-repeat-kind`}>Repeat:</label>
         <select
           id={`${idPrefix}-repeat-kind`}
           value={value.kind}
@@ -70,71 +73,86 @@ export default function RepeatEditor({ value, onChange, idPrefix }: RepeatEditor
       </div>
 
       {value.kind === "daily" && (
-        <div className="xp-field">
-          <label htmlFor={`${idPrefix}-repeat-days-interval`}>Every N days</label>
-          <input
-            id={`${idPrefix}-repeat-days-interval`}
-            type="number"
-            min={1}
-            max={52}
-            value={value.interval}
-            onChange={(event) =>
-              onChange({ kind: "daily", interval: Math.max(1, Number(event.target.value) || 1) })
-            }
-          />
-        </div>
-      )}
-
-      {value.kind === "weekly" && (
-        <>
-          <div className="xp-field">
-            <label htmlFor={`${idPrefix}-repeat-weeks-interval`}>Every N weeks</label>
+        <div className="xp-prow">
+          <label htmlFor={`${idPrefix}-repeat-days-interval`}>Every</label>
+          <span className="xp-inline">
             <input
-              id={`${idPrefix}-repeat-weeks-interval`}
+              id={`${idPrefix}-repeat-days-interval`}
               type="number"
               min={1}
               max={52}
               value={value.interval}
               onChange={(event) =>
-                onChange({ ...value, interval: Math.max(1, Number(event.target.value) || 1) })
+                onChange({ kind: "daily", interval: Math.max(1, Number(event.target.value) || 1) })
               }
             />
+            day(s)
+          </span>
+        </div>
+      )}
+
+      {value.kind === "weekly" && (
+        <>
+          <div className="xp-pcol">
+            <span>On:</span>
+            <div className="xp-weekdays" role="group" aria-label="Repeat days">
+              {DAY_PICKER_ORDER.map((dayIndex) => (
+                <button
+                  key={dayIndex}
+                  type="button"
+                  className="xp-btn"
+                  aria-pressed={value.days.includes(dayIndex)}
+                  aria-label={DAY_FULL[dayIndex]}
+                  onClick={() => toggleDay(dayIndex)}
+                >
+                  {DAY_NAMES[dayIndex].slice(0, 2)}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="xp-day-picker" aria-label="Repeat days">
-            {DAY_PICKER_ORDER.map((dayIndex) => (
-              <button
-                key={dayIndex}
-                type="button"
-                className="xp-button"
-                aria-pressed={value.days.includes(dayIndex)}
-                onClick={() => toggleDay(dayIndex)}
-              >
-                {DAY_NAMES[dayIndex]}
-              </button>
-            ))}
+          <div className="xp-prow">
+            <label htmlFor={`${idPrefix}-repeat-weeks-interval`}>Every</label>
+            <span className="xp-inline">
+              <input
+                id={`${idPrefix}-repeat-weeks-interval`}
+                type="number"
+                min={1}
+                max={52}
+                value={value.interval}
+                onChange={(event) =>
+                  onChange({ ...value, interval: Math.max(1, Number(event.target.value) || 1) })
+                }
+              />
+              week(s)
+            </span>
           </div>
         </>
       )}
 
       {value.kind === "monthly" && (
-        <div className="xp-field">
-          <label htmlFor={`${idPrefix}-repeat-day-of-month`}>Day of month</label>
-          <input
-            id={`${idPrefix}-repeat-day-of-month`}
-            type="number"
-            min={1}
-            max={31}
-            value={value.dayOfMonth}
-            onChange={(event) =>
-              onChange({
-                kind: "monthly",
-                dayOfMonth: Math.min(31, Math.max(1, Number(event.target.value) || 1)),
-              })
-            }
-          />
-          <p className="xp-settings-help">Months that are too short fire on their last day.</p>
-        </div>
+        <>
+          <div className="xp-prow">
+            <label htmlFor={`${idPrefix}-repeat-day-of-month`}>On day</label>
+            <span className="xp-inline">
+              <input
+                id={`${idPrefix}-repeat-day-of-month`}
+                type="number"
+                min={1}
+                max={31}
+                value={value.dayOfMonth}
+                onChange={(event) =>
+                  onChange({
+                    kind: "monthly",
+                    dayOfMonth: Math.min(31, Math.max(1, Number(event.target.value) || 1)),
+                  })
+                }
+              />
+              of each month
+            </span>
+          </div>
+          <p className="xp-hint">Months that are too short ring on their last day.</p>
+        </>
       )}
-    </div>
+    </fieldset>
   )
 }

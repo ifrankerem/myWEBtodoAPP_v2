@@ -11,7 +11,6 @@ describe('AddTaskScreen', () => {
       <AddTaskScreen
         onSave={onSave}
         onCancel={vi.fn()}
-        onOpenDrawer={vi.fn()}
       />,
     )
 

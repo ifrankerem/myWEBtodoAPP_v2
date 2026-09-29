@@ -2,12 +2,17 @@ import type { Metadata, Viewport } from 'next'
 import { WebAnalytics } from '@/components/web-analytics'
 import { AuthProvider } from '@/lib/auth-context'
 import { ThemeProvider } from '@/components/theme-provider'
+import { XpIconDefs } from '@/components/xp-icons'
+import { THEME_VALUES } from '@/lib/themes'
 import './globals.css'
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#245edb',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#0a2a8a' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+  ],
 }
 
 
@@ -75,7 +80,15 @@ export default function RootLayout({
         />
       </head>
       <body className="xp-app">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <XpIconDefs />
+        <ThemeProvider
+          attribute="data-theme"
+          themes={Object.keys(THEME_VALUES)}
+          value={THEME_VALUES}
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
           <AuthProvider>
             {children}
           </AuthProvider>
