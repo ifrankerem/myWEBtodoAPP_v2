@@ -21,6 +21,7 @@ import {
   getNextFireAt,
   type AlarmTaskInput,
 } from './alarm-schedule'
+import { toRepeatRule, type RepeatRule } from './repeat-rule'
 
 export interface AlarmDocument {
   uid: string
@@ -28,7 +29,10 @@ export interface AlarmDocument {
   title: string
   body: string
   alarm: string
+  /** Legacy string form, kept for older clients. */
   repeats: string | null
+  /** Structured rule the worker uses to re-arm repeats. */
+  repeatRule: RepeatRule
   dueDate: string | null
   tz: string
   fireAt: number
@@ -48,6 +52,7 @@ function buildAlarmDocument(uid: string, task: AlarmTaskInput, fireAt: number): 
     body: task.detail?.trim() ? task.detail.trim().slice(0, 200) : task.title,
     alarm: task.alarm as string,
     repeats: task.repeats ?? null,
+    repeatRule: toRepeatRule(task),
     dueDate: task.dueDate ?? null,
     tz: getDeviceTimeZone(),
     fireAt,
@@ -94,6 +99,7 @@ export async function syncAlarmSchedule(uid: string, tasks: AlarmTaskInput[]): P
       current.body === wanted.body &&
       current.alarm === wanted.alarm &&
       (current.repeats ?? null) === wanted.repeats &&
+      JSON.stringify(current.repeatRule ?? null) === JSON.stringify(wanted.repeatRule) &&
       (current.dueDate ?? null) === wanted.dueDate &&
       current.tz === wanted.tz &&
       typeof current.fireAt === 'number' &&

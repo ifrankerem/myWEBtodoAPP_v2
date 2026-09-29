@@ -1,9 +1,9 @@
 "use client"
 
-import { Bell, Calendar, Cloud, Download, LogOut, Shield, Upload, User } from "lucide-react"
 import { useEffect, useState } from "react"
-import type { Task } from "@/app/page"
+import type { Task } from "@/lib/task"
 import { exportAllAlarmsToICS } from "@/lib/calendar-export"
+import { saveTextFile } from "@/lib/save-file"
 import { isWebNotificationSupported, requestWebNotificationPermission } from "@/lib/web-notifications"
 import {
   disablePush,
@@ -13,13 +13,31 @@ import {
   type PushBlockReason,
 } from "@/lib/push-subscription"
 import { useAuth } from "@/lib/auth-context"
+import { Capacitor } from "@capacitor/core"
+import {
+  canScheduleExactAlarms,
+  checkNativeNotificationPermission,
+  openExactAlarmSettings,
+  requestNotificationPermissions,
+} from "@/lib/notifications"
 import { createCloudTask } from "@/lib/storage-cloud"
-import { XpHeader, XpStatusBar } from "@/components/xp-ui"
+import { XpIcon } from "@/components/xp-icons"
+import {
+  SCHEMES,
+  useScheme,
+  XpDialog,
+  XpMessage,
+  XpStatusBar,
+  XpSynced,
+  XpToolbar,
+  XpToolButton,
+  XpWindow,
+} from "@/components/xp-ui"
 
 interface SettingsScreenProps {
   tasks: Task[]
   onBack: () => void
-  onOpenDrawer: () => void
+  onLogOff: () => void
   onDataImported: () => void
 }
 
@@ -45,11 +63,92 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
-export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImported }: SettingsScreenProps) {
-  const { user, signOut } = useAuth()
+type NativeAlarmStatus = {
+  permission: "granted" | "denied" | "prompt"
+  exact: boolean
+}
+
+// The Android app schedules alarms with the OS alarm manager, so the Web Push
+// and web notification controls do not apply. This shows what the OS allows.
+function NativeAlarmSettings() {
+  const [status, setStatus] = useState<NativeAlarmStatus | null>(null)
+
+  const refresh = async () => {
+    const [permission, exact] = await Promise.all([checkNativeNotificationPermission(), canScheduleExactAlarms()])
+    setStatus({ permission, exact })
+  }
+
+  useEffect(() => {
+    refresh().catch((error) => console.error("Could not read alarm permissions:", error))
+  }, [])
+
+  const handleAllowNotifications = async () => {
+    await requestNotificationPermissions()
+    await refresh()
+  }
+
+  const handleAllowExact = async () => {
+    await openExactAlarmSettings().catch(() => false)
+    await refresh()
+  }
+
+  const notificationCopy = status === null
+    ? "Checking this device..."
+    : status.permission === "granted"
+      ? "On. Alarms ring even when the app is closed."
+      : status.permission === "denied"
+        ? "Blocked. Turn on notifications for Task Manager in Android settings."
+        : "Allow notifications so alarms can ring."
+
+  return (
+    <>
+      <div className="xp-setting-row">
+        <div><strong>Alarm notifications</strong><p>{notificationCopy}</p></div>
+        {status?.permission === "granted" && <StatusOk />}
+        {status?.permission === "prompt" && <button type="button" className="xp-btn is-small" onClick={handleAllowNotifications}>Allow</button>}
+      </div>
+      <div className="xp-setting-row">
+        <div>
+          <strong>Exact alarm timing</strong>
+          <p>{status === null ? "Checking..." : status.exact ? "Alarms ring on the exact minute." : "Off. Android may delay alarms by several minutes."}</p>
+        </div>
+        {status?.exact && <StatusOk />}
+        {status && !status.exact && <button type="button" className="xp-btn is-small" onClick={handleAllowExact}>Allow</button>}
+      </div>
+    </>
+  )
+}
+
+function StatusOk() {
+  return <span className="xp-status-ok"><XpIcon name="check" size={14} /> On</span>
+}
+
+function Appearance() {
+  const { scheme, changeScheme } = useScheme()
+  return (
+    <>
+      <div className="xp-monitor" aria-hidden="true">
+        <div className="xp-mon-screen"><span className="xp-mon-hill" /><span className="xp-mon-win" /><span className="xp-mon-bar" /></div>
+        <div className="xp-mon-stand" />
+        <div className="xp-mon-base" />
+      </div>
+      <div className="xp-radios" role="radiogroup" aria-label="Color scheme">
+        {SCHEMES.map(({ theme, label }) => (
+          <label key={theme} className="xp-rb">
+            <input type="radio" name="color-scheme" value={theme} checked={scheme === theme} onChange={() => changeScheme(theme)} />
+            <i aria-hidden="true" />
+            {label}
+          </label>
+        ))}
+      </div>
+    </>
+  )
+}
+
+export default function SettingsScreen({ tasks, onBack, onLogOff, onDataImported }: SettingsScreenProps) {
+  const { user } = useAuth()
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking")
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
-  const [signingOut, setSigningOut] = useState(false)
   const [pushState, setPushState] = useState<PushState>("checking")
   const [pushBlockedBy, setPushBlockedBy] = useState<PushBlockReason | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
@@ -59,6 +158,7 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
   }, [])
 
   useEffect(() => {
+    if (Capacitor.isNativePlatform()) return
     let cancelled = false
 
     const environment = getPushEnvironment()
@@ -81,29 +181,15 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
 
   const showResult = (result: ImportResult) => {
     setImportResult(result)
-    window.setTimeout(() => setImportResult(null), 3000)
   }
 
-  const handleSignOut = async () => {
-    setSigningOut(true)
+  const handleExportData = async () => {
     try {
-      await signOut()
-    } catch {
-      setSigningOut(false)
-    }
-  }
-
-  const handleExportData = () => {
-    try {
-      const blob = new Blob([JSON.stringify(tasks, null, 2)], { type: "application/json" })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `task-manager-backup-${new Date().toISOString().split("T")[0]}.json`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      await saveTextFile(
+        `task-manager-backup-${new Date().toISOString().split("T")[0]}.json`,
+        JSON.stringify(tasks, null, 2),
+        "application/json",
+      )
     } catch (error) {
       console.error("Export failed:", error)
       showResult({ success: false, message: "Could not export the backup." })
@@ -159,22 +245,27 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     input.click()
   }
 
-  const handleExportCalendar = () => {
+  const handleExportCalendar = async () => {
     const tasksWithAlarms = tasks.filter((task) => task.alarm && !task.completed)
     if (tasksWithAlarms.length === 0) {
       showResult({ success: false, message: "No tasks with alarms to export." })
       return
     }
 
-    exportAllAlarmsToICS(tasksWithAlarms.map((task) => ({
-      id: task.id,
-      title: task.title,
-      description: task.detail,
-      alarm: task.alarm!,
-      repeats: task.repeats,
-      dueDate: task.dueDate,
-    })))
-    showResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
+    try {
+      await exportAllAlarmsToICS(tasksWithAlarms.map((task) => ({
+        id: task.id,
+        title: task.title,
+        description: task.detail,
+        alarm: task.alarm!,
+        repeats: task.repeats,
+        dueDate: task.dueDate,
+      })))
+      showResult({ success: true, message: `Exported ${tasksWithAlarms.length} alarms to calendar.` })
+    } catch (error) {
+      console.error("Calendar export failed:", error)
+      showResult({ success: false, message: "Could not export the calendar file." })
+    }
   }
 
   const handleRequestNotifications = async () => {
@@ -220,15 +311,15 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
     pushState === "checking"
       ? "Checking this device..."
       : pushState === "on"
-        ? "On — alarms are delivered even when the app is closed."
+        ? "On. Alarms arrive even when the app is closed."
         : pushState === "blocked"
           ? PUSH_BLOCK_COPY[pushBlockedBy ?? "unsupported-browser"]
-          : "Off — alarms only fire while the app is open on screen."
+          : "Off. Alarms only ring while the app is open on screen."
 
   const notificationCopy = notificationStatus === "granted"
-    ? "Enabled — reminders may appear while the app is open."
+    ? "On. Reminders appear while the app is open."
     : notificationStatus === "denied"
-      ? "Blocked — enable notifications in the browser settings."
+      ? "Blocked. Turn on notifications in the browser settings."
       : notificationStatus === "not-supported"
         ? "This browser does not support web notifications."
         : notificationStatus === "checking"
@@ -236,81 +327,111 @@ export default function SettingsScreen({ tasks, onBack, onOpenDrawer, onDataImpo
           : "Permission has not been requested yet."
 
   return (
-    <section className="xp-screen xp-settings" aria-label="Settings">
-      <XpHeader title="Settings" onOpenDrawer={onOpenDrawer} onBack={onBack} />
-      <main className="xp-content">
-        <div className="xp-settings-sheet">
-          <section className="xp-groupbox">
-            <span className="xp-groupbox-title"><User /> Account</span>
-            <div className="xp-account-row">
-              <div className="xp-user-tile" aria-hidden="true">{user?.email?.charAt(0).toUpperCase() || "?"}</div>
-              <div className="xp-account-copy">
-                <strong>{user?.email || "Unknown"}</strong>
-                <span><Cloud /> Synced across devices</span>
+    <XpWindow title="Settings" icon="gear">
+      <XpToolbar label="Settings commands">
+        <XpToolButton icon="back" label="Back" onClick={onBack} />
+      </XpToolbar>
+      <div className="xp-window-body is-chrome">
+        <div className="xp-settings">
+          <section className="xp-category" aria-labelledby="set-account">
+            <XpIcon name="user" size={40} />
+            <div>
+              <h3 id="set-account">Account</h3>
+              <p><b>{user?.email || "Unknown account"}</b><br />Your tasks sync to this account across devices.</p>
+              <div className="xp-row-buttons">
+                <button type="button" className="xp-btn" onClick={onLogOff}><XpIcon name="logoff" size={16} /> Log Off</button>
               </div>
-              <button type="button" className="xp-button xp-button-danger" onClick={handleSignOut} disabled={signingOut}><LogOut /> {signingOut ? "Signing out..." : "Sign Out"}</button>
             </div>
           </section>
 
-          <section className="xp-groupbox">
-            <span className="xp-groupbox-title"><Bell /> Notifications</span>
-            <div className="xp-settings-row">
-              <div><strong>Background Alarms</strong><p>{pushCopy}</p></div>
-              {pushState === "on" && <span className="xp-badge xp-badge-success">On</span>}
-              {(pushState === "off" || pushState === "blocked") && (
-                <button
-                  type="button"
-                  className="xp-button"
-                  onClick={handleTogglePush}
-                  disabled={pushBusy || pushBlockedBy === "ios-needs-home-screen" || pushBlockedBy === "ios-too-old" || pushBlockedBy === "unsupported-browser" || pushBlockedBy === "missing-vapid-key"}
-                >
-                  {pushBusy ? "Working..." : "Turn On"}
-                </button>
+          <section className="xp-category" aria-labelledby="set-reminders">
+            <XpIcon name="bell" size={40} />
+            <div>
+              <h3 id="set-reminders">Reminders</h3>
+              {Capacitor.isNativePlatform() ? <NativeAlarmSettings /> : (
+                <>
+                  <div className="xp-setting-row">
+                    <div><strong>Background alarms</strong><p>{pushCopy}</p></div>
+                    {pushState === "on" ? (
+                      <button type="button" className="xp-btn is-small" onClick={handleTogglePush} disabled={pushBusy}>{pushBusy ? "Working..." : "Turn Off"}</button>
+                    ) : (pushState === "off" || pushState === "blocked") && (
+                      <button
+                        type="button"
+                        className="xp-btn is-small"
+                        onClick={handleTogglePush}
+                        disabled={pushBusy || pushBlockedBy === "ios-needs-home-screen" || pushBlockedBy === "ios-too-old" || pushBlockedBy === "unsupported-browser" || pushBlockedBy === "missing-vapid-key"}
+                      >
+                        {pushBusy ? "Working..." : "Turn On"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="xp-setting-row">
+                    <div><strong>Web notifications</strong><p>{notificationCopy}</p></div>
+                    {notificationStatus === "granted" && <StatusOk />}
+                    {notificationStatus !== "checking" && notificationStatus !== "not-supported" && notificationStatus !== "granted" && (
+                      <button type="button" className="xp-btn is-small" onClick={handleRequestNotifications}>Allow</button>
+                    )}
+                  </div>
+                </>
               )}
             </div>
-            {pushState === "on" && (
-              <div className="xp-settings-row">
-                <div><strong>Turn Off</strong><p>Stop delivering alarms to this device.</p></div>
-                <button type="button" className="xp-button" onClick={handleTogglePush} disabled={pushBusy}>
-                  {pushBusy ? "Working..." : "Turn Off"}
-                </button>
+          </section>
+
+          <section className="xp-category" aria-labelledby="set-appearance">
+            <XpIcon name="monitor" size={40} />
+            <div>
+              <h3 id="set-appearance">Appearance</h3>
+              <Appearance />
+            </div>
+          </section>
+
+          <section className="xp-category" aria-labelledby="set-calendar">
+            <XpIcon name="ics" size={40} />
+            <div>
+              <h3 id="set-calendar">Calendar</h3>
+              <p>Add every task that has an alarm to Google Calendar, Outlook or another calendar app, as an .ics file.</p>
+              <div className="xp-row-buttons">
+                <button type="button" className="xp-btn" onClick={handleExportCalendar}>Export alarms (.ics)</button>
               </div>
-            )}
-            <div className="xp-settings-row">
-              <div><strong>Web Notifications</strong><p>{notificationCopy}</p></div>
-              {notificationStatus !== "checking" && notificationStatus !== "not-supported" && notificationStatus !== "granted" && <button type="button" className="xp-button" onClick={handleRequestNotifications}>Enable</button>}
-              {notificationStatus === "granted" && <span className="xp-badge xp-badge-success">Enabled</span>}
             </div>
           </section>
 
-          <section className="xp-groupbox">
-            <span className="xp-groupbox-title"><Calendar /> Calendar Export</span>
-            <p className="xp-settings-help">Export task alarms to an .ics file. This is useful on platforms where PWA background notifications are limited.</p>
-            <button type="button" className="xp-button xp-settings-wide-button" onClick={handleExportCalendar}><Calendar /> Export Alarms to Calendar (.ics)</button>
-          </section>
-
-          <section className="xp-groupbox">
-            <span className="xp-groupbox-title"><Shield /> Data Management</span>
-            <div className="xp-settings-actions">
-              <button type="button" className="xp-button" onClick={handleExportData}><Download /> Export All Data (JSON)</button>
-              <button type="button" className="xp-button" onClick={handleImportData}><Upload /> Import Data (JSON)</button>
+          <section className="xp-category" aria-labelledby="set-backup">
+            <XpIcon name="floppy" size={40} />
+            <div>
+              <h3 id="set-backup">Backup</h3>
+              <p>Save all tasks to a file, or add the tasks from a backup to this account.</p>
+              <div className="xp-row-buttons">
+                <button type="button" className="xp-btn" onClick={handleExportData}>Back up (.json)</button>
+                <button type="button" className="xp-btn" onClick={handleImportData}>Restore…</button>
+              </div>
             </div>
-            <p className="xp-settings-help">Export creates a backup of all tasks. Import appends valid tasks from a backup to the current account.</p>
           </section>
 
-          {importResult && <div className={`xp-alert ${importResult.success ? "xp-alert-success" : "xp-alert-error"}`} role="status">{importResult.message}</div>}
-
-          <section className="xp-groupbox">
-            <span className="xp-groupbox-title">About</span>
-            <dl className="xp-settings-about">
-              <div><dt>Version</dt><dd>2.0.0 (Cloud Sync)</dd></div>
-              <div><dt>Tasks</dt><dd>{tasks.length}</dd></div>
-              <div><dt>Storage</dt><dd>Cloud (Firebase)</dd></div>
-            </dl>
+          <section className="xp-category" aria-labelledby="set-about">
+            <XpIcon name="info" size={40} />
+            <div>
+              <h3 id="set-about">About</h3>
+              <p><b>Task Manager 2.0.0</b><br />{tasks.length} task{tasks.length === 1 ? "" : "s"} stored in the cloud.</p>
+            </div>
           </section>
         </div>
-      </main>
-      <XpStatusBar><span className="flex-1">Preferences</span><span>{tasks.length} tasks</span></XpStatusBar>
-    </section>
+      </div>
+      <XpStatusBar>
+        <span className="xp-sb is-grow"><span>{user?.email ? `Signed in as ${user.email}` : "Settings"}</span></span>
+        <XpSynced />
+      </XpStatusBar>
+
+      {importResult && (
+        <XpDialog
+          title={importResult.success ? "Done" : "Something went wrong"}
+          icon={importResult.success ? "info" : "warning"}
+          onClose={() => setImportResult(null)}
+          buttons={<button type="button" className="xp-btn is-default" onClick={() => setImportResult(null)} autoFocus>OK</button>}
+        >
+          <XpMessage icon={importResult.success ? "info" : "warning"}><p>{importResult.message}</p></XpMessage>
+        </XpDialog>
+      )}
+    </XpWindow>
   )
 }

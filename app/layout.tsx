@@ -1,13 +1,18 @@
 import type { Metadata, Viewport } from 'next'
-import { Analytics } from '@vercel/analytics/next'
+import { WebAnalytics } from '@/components/web-analytics'
 import { AuthProvider } from '@/lib/auth-context'
 import { ThemeProvider } from '@/components/theme-provider'
+import { XpIconDefs } from '@/components/xp-icons'
+import { THEME_VALUES } from '@/lib/themes'
 import './globals.css'
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#245edb',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#0a2a8a' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+  ],
 }
 
 
@@ -55,8 +60,12 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
+              // The native app bundles its assets; a caching service worker
+              // would only serve stale builds after an APK update.
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
+                  var cap = window.Capacitor;
+                  if (cap && cap.isNativePlatform && cap.isNativePlatform()) return;
                   navigator.serviceWorker.register('/sw.js')
                     .then(function(registration) {
                       console.log('SW registered:', registration.scope);
@@ -71,12 +80,20 @@ export default function RootLayout({
         />
       </head>
       <body className="xp-app">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <XpIconDefs />
+        <ThemeProvider
+          attribute="data-theme"
+          themes={Object.keys(THEME_VALUES)}
+          value={THEME_VALUES}
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
           <AuthProvider>
             {children}
           </AuthProvider>
         </ThemeProvider>
-        <Analytics />
+        <WebAnalytics />
       </body>
     </html>
   )

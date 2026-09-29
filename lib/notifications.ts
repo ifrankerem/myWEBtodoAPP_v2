@@ -3,18 +3,14 @@
 
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications, type Channel, type LocalNotificationSchema } from '@capacitor/local-notifications';
-import { parseAlarmTime, parseTaskDate } from './task-dates';
+import { getNextFireAt, type AlarmTaskInput } from './alarm-schedule';
+import { DAY_NAMES, toRepeatRule } from './repeat-rule';
+import { parseAlarmTime } from './task-dates';
 
-// Day name to weekday number mapping (Sunday = 1, Monday = 2, etc. for LocalNotifications)
-const dayToWeekday: Record<string, number> = {
-  'Sun': 1,
-  'Mon': 2,
-  'Tue': 3,
-  'Wed': 4,
-  'Thu': 5,
-  'Fri': 6,
-  'Sat': 7,
-};
+// LocalNotifications numbers weekdays from 1 (Sunday), Date#getDay from 0.
+function toCapacitorWeekday(dayIndex: number): number {
+  return dayIndex + 1;
+}
 
 // Alarm channel ID
 const ALARM_CHANNEL_ID = 'task-alarms';
@@ -40,7 +36,6 @@ async function createAlarmChannel(): Promise<void> {
       description: 'Alarm notifications for your tasks',
       importance: 5, // Max importance (IMPORTANCE_HIGH) - makes sound and shows heads-up
       visibility: 1, // Public - show on lock screen
-      sound: 'alarm_sound.wav', // Custom alarm sound
       vibration: true,
       lights: true,
       lightColor: '#00FF88',
@@ -51,6 +46,44 @@ async function createAlarmChannel(): Promise<void> {
   } catch (error) {
     console.error('Error creating alarm channel:', error);
   }
+}
+
+// Android 12+ gates exact alarms behind a special permission. The manifest
+// declares USE_EXACT_ALARM, which Android 13+ grants automatically; Android 12
+// still needs the user to allow it once (see openExactAlarmSettings).
+export async function canScheduleExactAlarms(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return true;
+
+  try {
+    const { exact_alarm } = await LocalNotifications.checkExactNotificationSetting();
+    return exact_alarm === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+export async function openExactAlarmSettings(): Promise<boolean> {
+  const { exact_alarm } = await LocalNotifications.changeExactNotificationSetting();
+  return exact_alarm === 'granted';
+}
+
+export async function checkNativeNotificationPermission(): Promise<'granted' | 'denied' | 'prompt'> {
+  const { display } = await LocalNotifications.checkPermissions();
+  return display === 'granted' || display === 'denied' ? display : 'prompt';
+}
+
+/** Open the task a tapped alarm notification points at. Returns an unsubscribe. */
+export function onAlarmNotificationTap(openTask: (taskId: string) => void): () => void {
+  if (!Capacitor.isNativePlatform()) return () => {};
+
+  const handle = LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+    const taskId = action.notification.extra?.taskId;
+    if (typeof taskId === 'string') openTask(taskId);
+  });
+
+  return () => {
+    handle.then((listener) => listener.remove());
+  };
 }
 
 // Request notification permissions
@@ -81,14 +114,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 // Schedule a notification for a task
-export async function scheduleTaskNotification(task: {
-  id: string;
-  title: string;
-  alarm?: string;
-  repeats?: string;
-  detail?: string;
-  dueDate?: string;
-}): Promise<void> {
+export async function scheduleTaskNotification(task: AlarmTaskInput): Promise<void> {
   if (!Capacitor.isNativePlatform()) {
     console.log('Skipping notification scheduling on web');
     return;
@@ -116,66 +142,58 @@ export async function scheduleTaskNotification(task: {
   
   const notifications: LocalNotificationSchema[] = [];
   
-  if (task.repeats) {
-    // Repeating alarm - schedule for each selected day
-    const days = task.repeats.split(',').map(d => d.trim());
-    
-    for (const dayName of days) {
-      const weekday = dayToWeekday[dayName];
-      if (!weekday) continue;
-      
+  const rule = toRepeatRule(task);
+
+  const alarmDefaults = {
+    title: '🔔 ALARM',
+    body: task.title,
+    channelId: ALARM_CHANNEL_ID,
+    smallIcon: 'ic_stat_task',
+    largeIcon: 'ic_launcher',
+    ongoing: true, // Makes notification persistent until dismissed
+    autoCancel: false, // Don't auto-dismiss when tapped
+    foreground: true,
+    // Read back by the tap listener to open the task.
+    extra: { taskId: task.id },
+    // Checked up front: schedule() would otherwise open the system
+    // "Alarms & reminders" screen on every reschedule while it is denied.
+    isExactNotification: await canScheduleExactAlarms(),
+  } as const;
+
+  if (rule.kind === 'weekly' && rule.interval === 1) {
+    // The only shape LocalNotifications can repeat natively: same weekday every
+    // week. One notification per selected day.
+    for (const dayIndex of rule.days) {
       notifications.push({
-        id: generateNotificationId(task.id, dayName),
-        title: '🔔 ALARM',
-        body: task.title,
-        channelId: ALARM_CHANNEL_ID,
+        ...alarmDefaults,
+        id: generateNotificationId(task.id, DAY_NAMES[dayIndex]),
         schedule: {
           on: {
-            weekday,
+            weekday: toCapacitorWeekday(dayIndex),
             hour: time.hour,
             minute: time.minute,
           },
           allowWhileIdle: true,
         },
-        sound: 'alarm_sound.wav',
-        smallIcon: 'ic_launcher',
-        largeIcon: 'ic_launcher',
-        ongoing: true, // Makes notification persistent until dismissed
-        autoCancel: false, // Don't auto-dismiss when tapped
       });
     }
   } else {
-    // One-time alarm - use the due date when provided, otherwise today.
-    const now = new Date();
-    const scheduleDate = task.dueDate
-      ? parseTaskDate(task.dueDate)
-      : new Date();
-    if (Number.isNaN(scheduleDate.getTime())) {
-      console.error('Invalid due date:', task.dueDate);
+    // Everything else — one-shot alarms, and repeats the native scheduler
+    // cannot express (intervals, monthly) — is scheduled as the single next
+    // occurrence. It is re-scheduled whenever the task list changes.
+    const fireAt = getNextFireAt(task);
+    if (fireAt === null) {
+      console.log('No upcoming occurrence to schedule for', task.id);
       return;
     }
-    scheduleDate.setHours(time.hour, time.minute, 0, 0);
-    
-    // Only schedule if the time hasn't passed yet today
-    if (scheduleDate <= now) {
-      console.log('Alarm time has passed today, not scheduling');
-      return;
-    }
-    
+
     notifications.push({
+      ...alarmDefaults,
       id: generateNotificationId(task.id),
-      title: '🔔 ALARM',
-      body: task.title,
-      channelId: ALARM_CHANNEL_ID,
       schedule: {
-        at: scheduleDate,
+        at: new Date(fireAt),
         allowWhileIdle: true,
       },
-      sound: 'alarm_sound.wav',
-      smallIcon: 'ic_launcher',
-      largeIcon: 'ic_launcher',
-      ongoing: true, // Makes notification persistent until dismissed
-      autoCancel: false, // Don't auto-dismiss when tapped
     });
   }
   
@@ -202,7 +220,7 @@ export async function cancelTaskNotification(taskId: string): Promise<void> {
         if (n.id === baseId) return true;
         
         // Check day-specific IDs
-        for (const day of Object.keys(dayToWeekday)) {
+        for (const day of DAY_NAMES) {
           if (n.id === generateNotificationId(taskId, day)) return true;
         }
         return false;
@@ -219,14 +237,7 @@ export async function cancelTaskNotification(taskId: string): Promise<void> {
 }
 
 // Initialize notifications and reschedule all alarms
-export async function initializeNotifications(tasks: Array<{
-  id: string;
-  title: string;
-  alarm?: string;
-  repeats?: string;
-  dueDate?: string;
-  completed?: boolean;
-}>): Promise<void> {
+export async function initializeNotifications(tasks: AlarmTaskInput[]): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   
   const hasPermission = await requestNotificationPermissions();

@@ -15,6 +15,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getDbInstance } from './firebase';
+import type { RepeatRule } from './repeat-rule';
 import type { TaskRecord } from './storage-idb';
 
 // Get the tasks collection path for a user
@@ -49,11 +50,12 @@ function sortTasks(tasks: TaskRecord[]): TaskRecord[] {
   });
 }
 
-export type CloudTaskUpdates = Partial<Omit<TaskRecord, 'detail' | 'photo' | 'alarm' | 'repeats' | 'dueDate'>> & {
+export type CloudTaskUpdates = Partial<Omit<TaskRecord, 'detail' | 'photo' | 'alarm' | 'repeats' | 'repeatRule' | 'dueDate'>> & {
   detail?: string | null;
   photo?: string | null;
   alarm?: string | null;
   repeats?: string | null;
+  repeatRule?: RepeatRule | null;
   dueDate?: string | null;
 };
 
@@ -103,6 +105,7 @@ export async function createCloudTask(
     photo?: string;
     alarm?: string;
     repeats?: string;
+    repeatRule?: RepeatRule;
     dueDate?: string;
   }
 ): Promise<TaskRecord> {
@@ -119,6 +122,7 @@ export async function createCloudTask(
     updatedAt: now,
     alarm: data.alarm,
     repeats: data.repeats,
+    repeatRule: data.repeatRule,
     dueDate: data.dueDate,
     sortOrder: -Date.now(),
   };

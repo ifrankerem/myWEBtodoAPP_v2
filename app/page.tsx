@@ -1,20 +1,33 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react"
 import TasksGridScreen from "@/components/tasks-grid-screen"
 import CalendarScreen from "@/components/calendar-screen"
 import TaskDetailScreen from "@/components/task-detail-screen"
 import AddTaskScreen from "@/components/add-task-screen"
-import SlidingDrawer from "@/components/sliding-drawer"
+import StartMenu from "@/components/start-menu"
 import SettingsScreen from "@/components/settings-screen"
 import LoginScreen from "@/components/login-screen"
-import { XpHeader, XpStatusBar } from "@/components/xp-ui"
+import type { XpIconName } from "@/components/xp-icons"
+import {
+  animateGhost,
+  prefersReducedMotion,
+  WindowControlsProvider,
+  XpBalloon,
+  XpCopyDialog,
+  XpDialog,
+} from "@/components/xp-ui"
+import {
+  BootScreen,
+  DesktopIcons,
+  LogOffDialog,
+  RemindersDialog,
+  Taskbar,
+  Wallpaper,
+  WelcomeScreen,
+} from "@/components/xp-shell"
 import { useAuth } from "@/lib/auth-context"
-import { 
-  getTasks as getLocalTasks, 
-  fileToBase64,
-  type TaskRecord as StoredTask 
-} from "@/lib/storage-idb"
+import { getTasks as getLocalTasks, fileToBase64 } from "@/lib/storage-idb"
 import {
   subscribeToTasks,
   createCloudTask,
@@ -27,6 +40,7 @@ import {
 } from "@/lib/storage-cloud"
 import {
   initializeNotifications,
+  onAlarmNotificationTap,
   scheduleTaskNotification,
   cancelTaskNotification,
 } from "@/lib/notifications"
@@ -37,74 +51,90 @@ import {
 } from "@/lib/web-notifications"
 import { syncAlarmSchedule } from "@/lib/alarm-sync"
 import { refreshPushSubscription } from "@/lib/push-subscription"
+import {
+  dismissMissedAlarms,
+  subscribeToMissedAlarms,
+  type MissedAlarm,
+} from "@/lib/missed-alarms"
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 import { parseTaskDate } from '@/lib/task-dates'
+import { storedTaskToTask, type Screen, type Task } from '@/lib/task'
+import { daysFromToday } from '@/lib/task-display'
 
-export type Task = {
-  id: string
-  name: string
-  title: string
-  type: "picture" | "text" | "mixed"
-  photo?: string | null
-  detail?: string
-  createdDate: Date
-  lastEditedDate: Date
-  alarm?: string
-  repeats?: string
-  completed?: boolean
-  dueDate?: string
+
+const WINDOW_INFO: Record<Screen, { title: string; icon: XpIconName }> = {
+  tasks: { title: "My Tasks", icon: "folderTasks" },
+  completed: { title: "Completed", icon: "folderDone" },
+  calendar: { title: "Calendar", icon: "calendar" },
+  settings: { title: "Settings", icon: "gear" },
+  add: { title: "New Task", icon: "newTask" },
+  detail: { title: "Properties", icon: "doc" },
 }
 
-export type Screen = "tasks" | "calendar" | "detail" | "add" | "completed" | "settings"
-
-function LoadingScreen({ label }: { label: string }) {
-  return (
-    <section className="xp-screen" aria-live="polite" aria-busy="true">
-      <XpHeader title="Starting" />
-      <main className="xp-content grid place-items-center">
-        <div className="xp-loading-dialog">
-          <strong>Task Manager</strong>
-          <p>{label}...</p>
-          <div className="xp-progress" aria-hidden="true"><span /></div>
-        </div>
-      </main>
-      <XpStatusBar><span className="flex-1">Please wait</span></XpStatusBar>
-    </section>
-  )
-}
-
-// Transform stored task to frontend Task format
-function storedTaskToTask(stored: StoredTask): Task {
-  return {
-    id: stored.id,
-    name: stored.title,
-    title: stored.title,
-    type: stored.photo ? "picture" : "text",
-    photo: stored.photo || undefined,
-    detail: stored.detail || undefined,
-    createdDate: new Date(stored.createdAt),
-    lastEditedDate: new Date(stored.updatedAt),
-    alarm: stored.alarm || undefined,
-    repeats: stored.repeats || undefined,
-    completed: stored.completed,
-    dueDate: stored.dueDate || undefined,
-  }
-}
+/** How long the Explorer-style copy dialog shows after Save Task. */
+const SAVE_ANIMATION_MS = 1300
 
 export default function Page() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, signOut } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<Screen>("tasks")
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [startOpen, setStartOpen] = useState(false)
+  const [minimized, setMinimized] = useState(false)
+  const [windowed, setWindowed] = useState(false)
+  const [logOffOpen, setLogOffOpen] = useState(false)
+  const [remindersOpen, setRemindersOpen] = useState(false)
+  const [balloonClosed, setBalloonClosed] = useState(false)
+  const [savingTitle, setSavingTitle] = useState<string | null>(null)
+  const [detailTab, setDetailTab] = useState<"general" | "reminder">("general")
+  // Where the next window-open animation starts (start button, desktop icon, task tile).
+  const openOriginRef = useRef<DOMRect | null>(null)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
   const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
   const [returnScreen, setReturnScreen] = useState<Screen>("tasks")
+  const [missedAlarms, setMissedAlarms] = useState<MissedAlarm[]>([])
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const migrationDoneRef = useRef(false)
+  // Task id from a ?task=<id> notification deep link, held until tasks load.
+  const pendingTaskIdRef = useRef<string | null>(null)
+
+  // Read the deep link once, before the task list arrives. The URL is cleaned
+  // immediately so a refresh does not keep reopening the same task.
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get("task")
+    if (!taskId) return
+
+    pendingTaskIdRef.current = taskId
+    const url = new URL(window.location.href)
+    url.searchParams.delete("task")
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash)
+  }, [])
+
+  // Native alarm tapped. Cold starts deliver this before tasks load, so it
+  // goes through the same pending ref as the ?task= deep link.
+  useEffect(() => {
+    return onAlarmNotificationTap((taskId) => {
+      pendingTaskIdRef.current = taskId
+      setTasks((current) => [...current])
+    })
+  }, [])
+
+  // Once tasks are loaded, open the one the notification pointed at.
+  useEffect(() => {
+    const taskId = pendingTaskIdRef.current
+    if (!taskId || tasks.length === 0) return
+
+    const target = tasks.find((task) => task.id === taskId)
+    pendingTaskIdRef.current = null
+    if (!target) return
+
+    setSelectedTask(target)
+    setReturnScreen("tasks")
+    setCurrentScreen("detail")
+  }, [tasks])
 
   // Subscribe to cloud tasks when user is signed in
   useEffect(() => {
@@ -152,6 +182,7 @@ export default function Page() {
           title: t.title,
           alarm: t.alarm,
           repeats: t.repeats,
+          repeatRule: t.repeatRule,
           dueDate: t.dueDate,
           completed: t.completed,
         }))
@@ -187,6 +218,16 @@ export default function Page() {
     }
   }, [user, authLoading])
 
+  // Alarms the worker judged too late to deliver. Reported once so a missed
+  // reminder is never silently dropped.
+  useEffect(() => {
+    if (!user) {
+      setMissedAlarms([])
+      return
+    }
+    return subscribeToMissedAlarms(user.uid, setMissedAlarms)
+  }, [user])
+
   // Keep the stored push endpoint fresh — iOS rotates endpoints, and the
   // worker can only reach devices it finds in Firestore.
   useEffect(() => {
@@ -200,19 +241,65 @@ export default function Page() {
       if (event.data?.type === 'pushsubscriptionchange') {
         refreshPushSubscription(user.uid)
       }
+
+      // Notification tapped while the app was already open.
+      if (event.data?.type === 'open-task' && typeof event.data.taskId === 'string') {
+        pendingTaskIdRef.current = event.data.taskId
+        setTasks((current) => [...current])
+      }
     }
 
     navigator.serviceWorker.addEventListener('message', handleMessage)
     return () => navigator.serviceWorker.removeEventListener('message', handleMessage)
   }, [user])
 
+  // Open a window. With an origin element, the XP "zoom rectangle" grows from it.
+  const navigate = useCallback((screen: Screen, origin?: Element | null) => {
+    openOriginRef.current = origin && !prefersReducedMotion() ? origin.getBoundingClientRect() : null
+    setStartOpen(false)
+    setMinimized(false)
+    setCurrentScreen(screen)
+  }, [])
+
+  useLayoutEffect(() => {
+    const origin = openOriginRef.current
+    openOriginRef.current = null
+    if (!origin || minimized) return
+    const win = document.querySelector<HTMLElement>("[data-xp-window]")
+    if (!win) return
+    win.classList.add("is-hidden")
+    animateGhost({ x: origin.left, y: origin.top, w: origin.width, h: origin.height }, win).finally(() => {
+      win.classList.remove("is-hidden")
+    })
+  }, [currentScreen, minimized])
+
+  const minimize = useCallback(async () => {
+    const win = document.querySelector<HTMLElement>("[data-xp-window]")
+    const button = document.querySelector("[data-xp-winbtn]")
+    if (win && button) {
+      win.classList.add("is-hidden")
+      await animateGhost(win, button, 210)
+    }
+    setStartOpen(false)
+    setMinimized(true)
+  }, [])
+
   // Handle hardware back button on Android
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
     const handleBackButton = () => {
-      if (drawerOpen) {
-        setDrawerOpen(false);
+      if (startOpen) {
+        setStartOpen(false);
+        return;
+      }
+      if (logOffOpen || remindersOpen) {
+        setLogOffOpen(false);
+        setRemindersOpen(false);
+        return;
+      }
+      if (minimized) {
+        App.exitApp();
         return;
       }
 
@@ -239,18 +326,20 @@ export default function Page() {
     return () => {
       listener.then(l => l.remove());
     };
-  }, [currentScreen, drawerOpen, returnScreen]);
+  }, [currentScreen, startOpen, logOffOpen, remindersOpen, minimized, returnScreen]);
 
-  const handleTaskClick = (task: Task) => {
-    setReturnScreen(currentScreen)
+  const handleTaskClick = (task: Task, origin?: Element) => {
+    setReturnScreen(currentScreen === "detail" || currentScreen === "add" ? returnScreen : currentScreen)
     setSelectedTask(task)
-    setCurrentScreen("detail")
+    setDetailTab("general")
+    navigate("detail", origin)
   }
 
-  const handleNavigate = (screen: Screen) => {
-    if (screen === "settings") setReturnScreen(currentScreen)
-    setCurrentScreen(screen)
-    setDrawerOpen(false)
+  const handleNavigate = (screen: Screen, origin?: Element | null) => {
+    if (screen === "settings" || screen === "add") {
+      setReturnScreen(currentScreen === "detail" || currentScreen === "add" || currentScreen === "settings" ? returnScreen : currentScreen)
+    }
+    navigate(screen, origin)
   }
 
   const handleAddTask = async (newTask: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => {
@@ -258,6 +347,8 @@ export default function Page() {
 
     // Navigate back immediately so offline doesn't block the UI
     setCurrentScreen(returnScreen)
+    setSavingTitle(newTask.title)
+    window.setTimeout(() => setSavingTitle(null), prefersReducedMotion() ? 0 : SAVE_ANIMATION_MS)
 
     // Easter egg: Check if due date is December 20
     if (newTask.dueDate) {
@@ -277,11 +368,12 @@ export default function Page() {
         }
         
         const created = await createCloudTask(user.uid, {
-          title: newTask.title || newTask.name,
+          title: newTask.title,
           detail: newTask.detail,
           photo: photoBase64,
           alarm: newTask.alarm,
           repeats: newTask.repeats,
+          repeatRule: newTask.repeatRule,
           dueDate: newTask.dueDate,
         })
         
@@ -292,6 +384,7 @@ export default function Page() {
             title: created.title,
             alarm: created.alarm,
             repeats: created.repeats,
+            repeatRule: created.repeatRule,
             dueDate: created.dueDate,
           })
           
@@ -300,6 +393,7 @@ export default function Page() {
             title: created.title,
             alarm: created.alarm,
             repeats: created.repeats,
+            repeatRule: created.repeatRule,
             dueDate: created.dueDate,
           })
         }
@@ -348,6 +442,7 @@ export default function Page() {
         title: task.title,
         alarm: task.alarm,
         repeats: task.repeats,
+        repeatRule: task.repeatRule,
         dueDate: task.dueDate,
       })
       startForegroundReminder({
@@ -355,6 +450,7 @@ export default function Page() {
         title: task.title,
         alarm: task.alarm,
         repeats: task.repeats,
+        repeatRule: task.repeatRule,
         dueDate: task.dueDate,
       })
     }
@@ -370,6 +466,7 @@ export default function Page() {
     if ('dueDate' in updates) storageUpdates.dueDate = updates.dueDate ?? null
     if ('alarm' in updates) storageUpdates.alarm = updates.alarm ?? null
     if ('repeats' in updates) storageUpdates.repeats = updates.repeats ?? null
+    if ('repeatRule' in updates) storageUpdates.repeatRule = updates.repeatRule ?? null
     
     await updateCloudTask(user.uid, taskId, storageUpdates)
     
@@ -378,6 +475,7 @@ export default function Page() {
     if (task) {
       const newAlarm = 'alarm' in updates ? updates.alarm : task.alarm
       const newRepeats = 'repeats' in updates ? updates.repeats : task.repeats
+      const newRepeatRule = 'repeatRule' in updates ? updates.repeatRule : task.repeatRule
       const newTitle = updates.title || task.title
       const newDueDate = 'dueDate' in updates ? updates.dueDate : task.dueDate
       
@@ -387,6 +485,7 @@ export default function Page() {
           title: newTitle,
           alarm: newAlarm,
           repeats: newRepeats,
+          repeatRule: newRepeatRule,
           dueDate: newDueDate,
         })
         startForegroundReminder({
@@ -394,6 +493,7 @@ export default function Page() {
           title: newTitle,
           alarm: newAlarm,
           repeats: newRepeats,
+          repeatRule: newRepeatRule,
           dueDate: newDueDate,
         })
       } else {
@@ -420,7 +520,7 @@ export default function Page() {
 
   // Auth loading state
   if (authLoading) {
-    return <LoadingScreen label="Loading your account" />
+    return <BootScreen />
   }
 
   // Show login screen if not authenticated
@@ -430,138 +530,231 @@ export default function Page() {
 
   // Loading tasks state
   if (loading) {
-    return <LoadingScreen label="Synchronizing tasks" />
+    return <WelcomeScreen message="Syncing your tasks…" />
   }
 
+  const handleMissedAlarmClick = (missed: MissedAlarm) => {
+    const target = tasks.find((task) => task.id === missed.taskId)
+    setRemindersOpen(false)
+    if (!target) return
+    setReturnScreen("tasks")
+    setSelectedTask(target)
+    setDetailTab("reminder")
+    navigate("detail")
+  }
+
+  const handleLogOff = async () => {
+    setLogOffOpen(false)
+    try {
+      await signOut()
+    } catch (err) {
+      console.error('Sign out failed:', err)
+    }
+  }
+
+  const openLogOff = () => {
+    setStartOpen(false)
+    setLogOffOpen(true)
+  }
+
+  const openTasks = tasks.filter((t) => !t.completed)
+  const counts = {
+    open: openTasks.length,
+    dueThisWeek: openTasks.filter((t) => {
+      if (!t.dueDate) return false
+      const days = daysFromToday(parseTaskDate(t.dueDate))
+      return days >= 0 && days < 7
+    }).length,
+    done: tasks.length - openTasks.length,
+  }
+
+  const info = WINDOW_INFO[currentScreen]
+  const windowTitle = currentScreen === "detail" && selectedTask ? `${selectedTask.title} Properties` : info.title
+  const showBalloon = missedAlarms.length > 0 && !balloonClosed && !remindersOpen
+
+  const goBackToTasks = () => setCurrentScreen("tasks")
+
   return (
-    <div className="xp-app-shell">
-      {/* Drawer Overlay */}
-      {drawerOpen && (
-        <button
-          type="button"
-          className="xp-drawer-overlay"
-          aria-label="Close menu"
-          onClick={() => setDrawerOpen(false)}
+    <WindowControlsProvider
+      value={{
+        windowed,
+        onMinimize: minimize,
+        onToggleWindowed: () => setWindowed((value) => !value),
+        onClose: () => (currentScreen === "tasks" ? minimize() : setCurrentScreen("tasks")),
+      }}
+    >
+      <div className={`xp-shell${logOffOpen ? " is-gray" : ""}`}>
+        <Wallpaper />
+
+        {minimized ? (
+          <DesktopIcons onOpen={(screen, origin) => handleNavigate(screen, origin)} />
+        ) : (
+          <>
+            {currentScreen === "tasks" && (
+              <TasksGridScreen
+                tasks={openTasks}
+                onTaskClick={handleTaskClick}
+                onAddTask={() => {
+                  setReturnScreen("tasks")
+                  navigate("add")
+                }}
+                onDeleteTask={handleDeleteTask}
+                onToggleComplete={handleToggleComplete}
+                onReorderTasks={async (reorderedTasks) => {
+                  if (!user) return
+                  const completedTasks = tasks.filter(t => t.completed)
+                  const allTasks = [...reorderedTasks, ...completedTasks]
+                  setTasks(allTasks)
+                  await saveCloudTasks(user.uid, allTasks.map(t => ({
+                    id: t.id,
+                    title: t.title,
+                    detail: t.detail,
+                    photo: t.photo || undefined,
+                    completed: t.completed || false,
+                    createdAt: t.createdDate.toISOString(),
+                    updatedAt: t.lastEditedDate.toISOString(),
+                    alarm: t.alarm,
+                    repeats: t.repeats,
+                    repeatRule: t.repeatRule,
+                    dueDate: t.dueDate,
+                  })))
+                }}
+              />
+            )}
+            {currentScreen === "completed" && (
+              <TasksGridScreen
+                tasks={tasks.filter((t) => t.completed)}
+                onTaskClick={handleTaskClick}
+                onAddTask={() => {
+                  setReturnScreen("completed")
+                  navigate("add")
+                }}
+                onDeleteTask={handleDeleteTask}
+                onToggleComplete={handleToggleComplete}
+                onBack={goBackToTasks}
+                isCompletedView={true}
+              />
+            )}
+            {currentScreen === "calendar" && (
+              <CalendarScreen
+                tasks={tasks}
+                onBack={goBackToTasks}
+                onSelectTask={handleTaskClick}
+                onAddTask={(date) => {
+                  setCalendarDueDate(date)
+                  setReturnScreen("calendar")
+                  navigate("add")
+                }}
+              />
+            )}
+            {currentScreen === "detail" && selectedTask && (
+              <TaskDetailScreen
+                task={selectedTask}
+                initialTab={detailTab}
+                onBack={() => setCurrentScreen(returnScreen)}
+                onToggleComplete={handleToggleComplete}
+                onUpdateTask={handleUpdateTask}
+                onDeleteTask={handleDeleteTask}
+              />
+            )}
+            {currentScreen === "add" && (
+              <AddTaskScreen
+                onSave={(task, photoFile) => {
+                  setCalendarDueDate(undefined)
+                  handleAddTask(task, photoFile)
+                }}
+                onCancel={() => {
+                  setCalendarDueDate(undefined)
+                  setCurrentScreen(returnScreen)
+                }}
+                initialDueDate={calendarDueDate}
+              />
+            )}
+            {currentScreen === "settings" && (
+              <SettingsScreen
+                tasks={tasks}
+                onBack={() => setCurrentScreen(returnScreen)}
+                onLogOff={openLogOff}
+                onDataImported={handleReloadTasks}
+              />
+            )}
+          </>
+        )}
+
+        <Taskbar
+          startOpen={startOpen}
+          onStart={() => setStartOpen((open) => !open)}
+          windowButton={{ title: windowTitle, icon: info.icon, active: !minimized }}
+          onWindowButton={() => (minimized ? navigate(currentScreen, document.querySelector("[data-xp-winbtn]")) : minimize())}
+          missedCount={missedAlarms.length}
+          onReminders={() => {
+            setStartOpen(false)
+            setRemindersOpen(true)
+          }}
         />
-      )}
 
-      {/* Sliding Drawer */}
-      <SlidingDrawer 
-        isOpen={drawerOpen} 
-        currentScreen={currentScreen} 
-        onNavigate={handleNavigate}
-      />
+        {startOpen && (
+          <StartMenu
+            email={user.email ?? "Signed in"}
+            currentScreen={currentScreen}
+            counts={counts}
+            onNavigate={(screen) => handleNavigate(screen, document.querySelector("[data-xp-start]"))}
+            onNewTask={() => {
+              setReturnScreen(currentScreen === "detail" || currentScreen === "add" ? returnScreen : currentScreen)
+              navigate("add", document.querySelector("[data-xp-start]"))
+            }}
+            onShowReminders={() => {
+              setStartOpen(false)
+              setRemindersOpen(true)
+            }}
+            onLogOff={openLogOff}
+            onClose={() => setStartOpen(false)}
+          />
+        )}
 
-      {/* Main Content */}
-      <div className="relative z-10 h-full">
-        {currentScreen === "tasks" && (
-          <TasksGridScreen
-            tasks={tasks.filter((t) => !t.completed)}
-            onTaskClick={handleTaskClick}
-            onAddTask={() => {
-              setReturnScreen("tasks")
-              setCurrentScreen("add")
+        {showBalloon && (
+          <XpBalloon
+            title={missedAlarms.length === 1 ? "Missed reminder" : `${missedAlarms.length} missed reminders`}
+            onOpen={() => setRemindersOpen(true)}
+            onClose={() => setBalloonClosed(true)}
+          >
+            {missedAlarms.length === 1
+              ? `“${missedAlarms[0].title}” rang while Task Manager was closed. Tap to review it.`
+              : "Some alarms rang while Task Manager was closed. Tap to review them."}
+          </XpBalloon>
+        )}
+
+        {remindersOpen && (
+          <RemindersDialog
+            missed={missedAlarms}
+            onOpenTask={handleMissedAlarmClick}
+            onDismissAll={() => {
+              setRemindersOpen(false)
+              if (user) dismissMissedAlarms(user.uid)
             }}
-            onDeleteTask={handleDeleteTask}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onReorderTasks={async (reorderedTasks) => {
-              if (!user) return
-              const completedTasks = tasks.filter(t => t.completed)
-              const allTasks = [...reorderedTasks, ...completedTasks]
-              setTasks(allTasks)
-              await saveCloudTasks(user.uid, allTasks.map(t => ({
-                id: t.id,
-                title: t.title,
-                detail: t.detail,
-                photo: t.photo || undefined,
-                completed: t.completed || false,
-                createdAt: t.createdDate.toISOString(),
-                updatedAt: t.lastEditedDate.toISOString(),
-                alarm: t.alarm,
-                repeats: t.repeats,
-                dueDate: t.dueDate,
-              })))
-            }}
+            onClose={() => setRemindersOpen(false)}
           />
         )}
-        {currentScreen === "completed" && (
-          <TasksGridScreen
-            tasks={tasks.filter((t) => t.completed)}
-            onTaskClick={handleTaskClick}
-            onAddTask={() => {
-              setReturnScreen("completed")
-              setCurrentScreen("add")
-            }}
-            onDeleteTask={handleDeleteTask}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            isCompletedView={true}
-          />
-        )}
-        {currentScreen === "calendar" && (
-          <CalendarScreen 
-            tasks={tasks} 
-            onOpenDrawer={() => setDrawerOpen(true)} 
-            onSelectTask={handleTaskClick}
-            onAddTask={(date) => {
-              setCalendarDueDate(date)
-              setReturnScreen("calendar")
-              setCurrentScreen("add")
-            }}
-          />
-        )}
-        {currentScreen === "detail" && selectedTask && (
-          <TaskDetailScreen
-            task={selectedTask}
-            onBack={() => setCurrentScreen(returnScreen)}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onToggleComplete={handleToggleComplete}
-            onUpdateTask={handleUpdateTask}
-            onDeleteTask={handleDeleteTask}
-          />
-        )}
-        {currentScreen === "add" && (
-          <AddTaskScreen
-            onSave={(task, photoFile) => {
-              setCalendarDueDate(undefined)
-              handleAddTask(task, photoFile)
-            }}
-            onCancel={() => {
-              setCalendarDueDate(undefined)
-              setCurrentScreen(returnScreen)
-            }}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            initialDueDate={calendarDueDate}
-          />
-        )}
-        {currentScreen === "settings" && (
-          <SettingsScreen
-            tasks={tasks}
-            onBack={() => setCurrentScreen(returnScreen)}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onDataImported={handleReloadTasks}
-          />
+
+        {savingTitle !== null && <XpCopyDialog title={savingTitle} />}
+
+        {/* Easter Egg Modal - December 20 */}
+        {showEasterEgg && (
+          <XpDialog
+            title="December 20"
+            icon="info"
+            onClose={() => setShowEasterEgg(false)}
+            maxWidth={560}
+            buttons={<button type="button" className="xp-btn is-default" onClick={() => setShowEasterEgg(false)}>OK</button>}
+          >
+            <div className="xp-photo-view">
+              <img src="/easter-egg.png" alt="Easter Egg" />
+            </div>
+          </XpDialog>
         )}
       </div>
 
-      {/* Easter Egg Modal - December 20 */}
-      {showEasterEgg && (
-        <div className="xp-modal-backdrop">
-          <div className="xp-dialog" role="dialog" aria-modal="true" aria-label="December 20">
-            <div className="xp-titlebar">
-              <div className="xp-titlebar-caption">December 20</div>
-              <button type="button" className="xp-dialog-close" onClick={() => setShowEasterEgg(false)} aria-label="Close">✕</button>
-            </div>
-            <div className="xp-dialog-body">
-            <img 
-              src="/easter-egg.png" 
-              alt="Easter Egg" 
-              className="max-w-[80vw] max-h-[72vh] object-contain"
-            />
-            </div>
-            <div className="xp-actionbar"><button type="button" className="xp-button" onClick={() => setShowEasterEgg(false)}>OK</button></div>
-          </div>
-        </div>
-      )}
-    </div>
+      {logOffOpen && <LogOffDialog onLogOff={handleLogOff} onCancel={() => setLogOffOpen(false)} />}
+    </WindowControlsProvider>
   )
 }

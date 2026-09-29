@@ -195,11 +195,15 @@ self.addEventListener('notificationclick', (event) => {
     self.location.origin
   ).href;
 
+  const taskId = (event.notification.data && event.notification.data.taskId) || null;
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
-          if ('navigate' in client) client.navigate(targetUrl).catch(() => {});
+          // Tell the running app which task to open instead of navigating,
+          // which would reload it and throw away its state.
+          if (taskId) client.postMessage({ type: 'open-task', taskId });
           return client.focus();
         }
       }

@@ -5,7 +5,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Each user owns their tasks and their registered push endpoints.
+    // Each user owns their tasks, their registered push endpoints, and the
+    // missed-alarm records the worker writes for them.
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }

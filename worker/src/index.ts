@@ -35,6 +35,8 @@ interface AlarmRecord {
   body: string
   alarm: string
   repeats: string | null
+  repeatRule: unknown
+  dueDate: string | null
   tz: string | null
   fireAt: number
 }
@@ -64,6 +66,8 @@ function toAlarmRecord(name: string, fields: Record<string, unknown>): AlarmReco
     body: typeof fields.body === 'string' && fields.body ? fields.body : title,
     alarm,
     repeats: typeof fields.repeats === 'string' ? fields.repeats : null,
+    repeatRule: fields.repeatRule ?? null,
+    dueDate: typeof fields.dueDate === 'string' ? fields.dueDate : null,
     tz: typeof fields.tz === 'string' ? fields.tz : null,
     fireAt,
   }
@@ -132,11 +136,35 @@ export async function runAlarmSweep(env: Env, now = Date.now()): Promise<RunSumm
   const deadSubscriptions = new Set<string>()
   const appUrl = env.APP_URL || '/'
 
+  /** Deep link that opens the app directly on the task that fired. */
+  const taskUrl = (taskId: string): string => {
+    if (!taskId) return appUrl
+    try {
+      const url = new URL(appUrl)
+      url.searchParams.set('task', taskId)
+      return url.toString()
+    } catch {
+      return appUrl
+    }
+  }
+
   for (const alarm of alarms) {
     const late = now - alarm.fireAt > MAX_LATENESS_MS
 
     if (late) {
+      // A "07:00 wake up" arriving at 14:00 is noise, so it is not delivered.
+      // Record it instead so the app can tell the user what they missed.
       summary.skippedLate++
+      try {
+        await firestore.recordMissedAlarm(alarm.uid, {
+          taskId: alarm.taskId,
+          title: alarm.title,
+          fireAt: alarm.fireAt,
+          noticedAt: now,
+        })
+      } catch (error) {
+        summary.errors.push(`missed ${alarm.id}: ${(error as Error).message}`)
+      }
     } else {
       const subscriptions = subscriptionsByUid.get(alarm.uid) ?? []
 
@@ -151,7 +179,7 @@ export async function runAlarmSweep(env: Env, now = Date.now()): Promise<RunSumm
             tag: alarm.taskId || alarm.id,
             taskId: alarm.taskId,
             fireAt: alarm.fireAt,
-            url: appUrl,
+            url: taskUrl(alarm.taskId),
           },
           vapid
         )

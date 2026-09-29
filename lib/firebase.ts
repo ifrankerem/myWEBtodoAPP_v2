@@ -3,7 +3,8 @@
 // Uses getter pattern to avoid initializing during server-side prerendering
 
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { getAuth, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth';
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -35,7 +36,12 @@ function getApp(): FirebaseApp {
 // Auth instance (lazy)
 export function getAuthInstance(): Auth {
   if (!_auth) {
-    _auth = getAuth(getApp());
+    // getAuth() wires up the popup/redirect resolver, which loads an iframe
+    // from authDomain and can stall inside the Android WebView. Native Google
+    // sign-in goes through signInWithCredential, so no resolver is needed.
+    _auth = Capacitor.isNativePlatform()
+      ? initializeAuth(getApp(), { persistence: indexedDBLocalPersistence })
+      : getAuth(getApp());
   }
   return _auth;
 }

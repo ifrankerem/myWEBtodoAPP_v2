@@ -2,7 +2,7 @@
 // Works alongside Capacitor notifications for web-only scenarios
 
 import { Capacitor } from '@capacitor/core';
-import { parseAlarmTime, parseTaskDate } from './task-dates';
+import { getNextFireAt, type AlarmTaskInput } from './alarm-schedule';
 
 // Store for active foreground reminders
 const activeReminders = new Map<string, number>();
@@ -35,83 +35,28 @@ export function showWebNotification(title: string, options?: NotificationOptions
   });
 }
 
-// Day name mapping
-const dayNameToIndex: Record<string, number> = {
-  'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6,
-};
-
-// Check if task should trigger today
-function shouldTriggerToday(task: {
-  alarm?: string;
-  repeats?: string;
-  dueDate?: string;
-  completed?: boolean;
-}): boolean {
-  if (task.completed) return false;
-  if (!task.alarm) return false;
-  
-  const today = new Date();
-  const todayDayIndex = today.getDay();
-  
-  // If has repeat days, check if today is one of them
-  if (task.repeats) {
-    const repeatDays = task.repeats.split(',').map(d => d.trim());
-    return repeatDays.some(day => dayNameToIndex[day] === todayDayIndex);
-  }
-  
-  // If has due date, check if it's today
-  if (task.dueDate) {
-    const dueDate = parseTaskDate(task.dueDate);
-    return dueDate.toDateString() === today.toDateString();
-  }
-  
-  // One-time alarm defaults to today
-  return true;
-}
-
-// Calculate next trigger time for a task
-function getNextTriggerTime(task: {
-  alarm?: string;
-  repeats?: string;
-}): Date | null {
-  if (!task.alarm) return null;
-  
-  const time = parseAlarmTime(task.alarm);
-  if (!time) return null;
-  
-  const now = new Date();
-  const triggerTime = new Date();
-  triggerTime.setHours(time.hour, time.minute, 0, 0);
-  
-  // If time has passed today, don't trigger
-  if (triggerTime <= now) return null;
-  
-  return triggerTime;
-}
-
-// Start foreground reminder checking for a task
-export function startForegroundReminder(task: {
-  id: string;
-  title: string;
-  alarm?: string;
-  repeats?: string;
-  dueDate?: string;
-  completed?: boolean;
-}): void {
+/**
+ * Start an in-page reminder for a task.
+ *
+ * This only covers the case where the app is open and on screen — the timer
+ * dies as soon as the browser suspends the page. Delivery when the app is
+ * closed comes from Web Push instead (see lib/alarm-sync.ts and worker/).
+ */
+export function startForegroundReminder(task: AlarmTaskInput): void {
   // Cancel any existing reminder for this task
   stopForegroundReminder(task.id);
-  
+
   if (!task.alarm || task.completed) return;
-  if (!shouldTriggerToday(task)) return;
-  
-  const triggerTime = getNextTriggerTime(task);
-  if (!triggerTime) return;
-  
-  const now = new Date();
-  const delay = triggerTime.getTime() - now.getTime();
-  
-  if (delay <= 0) return;
-  
+
+  const fireAt = getNextFireAt(task);
+  if (fireAt === null) return;
+
+  const delay = fireAt - Date.now();
+
+  // setTimeout clamps above ~24.8 days, so skip anything that far out; the
+  // schedule is recomputed every time the task list changes anyway.
+  if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+
   console.log(`Scheduling foreground reminder for "${task.title}" in ${Math.round(delay / 1000 / 60)} minutes`);
   
   const timeoutId = window.setTimeout(() => {
@@ -224,14 +169,7 @@ function showInAppAlert(message: string): void {
 }
 
 // Initialize foreground reminders for all tasks
-export function initializeForegroundReminders(tasks: Array<{
-  id: string;
-  title: string;
-  alarm?: string;
-  repeats?: string;
-  dueDate?: string;
-  completed?: boolean;
-}>): void {
+export function initializeForegroundReminders(tasks: AlarmTaskInput[]): void {
   // Only run on web platforms (not native Capacitor)
   if (Capacitor.isNativePlatform()) return;
   
