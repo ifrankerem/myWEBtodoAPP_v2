@@ -1,9 +1,10 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { XpIcon, type XpIconName } from "@/components/xp-icons"
 import type { Task } from "@/lib/task"
+import type { ComponentProps } from "react"
 export { SCHEMES } from "@/lib/themes"
 
 /* =====================================================================
@@ -111,6 +112,38 @@ export const XpToolSeparator = () => <span className="xp-tsep" aria-hidden="true
 
 export function XpStatusBar({ children }: { children: ReactNode }) {
   return <footer className="xp-statusbar">{children}</footer>
+}
+
+/**
+ * A textarea that grows with its text, up to the max-height its stylesheet
+ * sets, and scrolls after that. A field the reader cannot scroll through is
+ * the same as a field that hides what was typed.
+ */
+export function XpAutoTextarea({
+  value,
+  maxRows,
+  className,
+  ...rest
+}: {
+  value: string
+  maxRows?: number
+  className?: string
+} & Omit<ComponentProps<"textarea">, "value" | "rows" | "className">) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = "auto"
+    const styles = getComputedStyle(el)
+    const line = Number.parseFloat(styles.lineHeight) || 20
+    const chrome = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom)
+    const cap = maxRows ? line * maxRows + chrome : Infinity
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden"
+  }, [value, maxRows])
+
+  return <textarea ref={ref} rows={1} value={value} className={className} {...rest} />
 }
 
 export function XpSynced() {
