@@ -8,6 +8,7 @@ import AddTaskScreen from "@/components/add-task-screen"
 import StartMenu from "@/components/start-menu"
 import SettingsScreen from "@/components/settings-screen"
 import LoginScreen from "@/components/login-screen"
+import VoiceCommand from "@/components/voice-command"
 import type { XpIconName } from "@/components/xp-icons"
 import {
   animateGhost,
@@ -56,11 +57,14 @@ import {
   subscribeToMissedAlarms,
   type MissedAlarm,
 } from "@/lib/missed-alarms"
+import { Toaster } from 'sonner'
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 import { parseTaskDate } from '@/lib/task-dates'
 import { storedTaskToTask, type Screen, type Task } from '@/lib/task'
+import type { RepeatRule } from '@/lib/repeat-rule'
+import type { VoiceIntent } from '@/lib/voice-intent'
 import { daysFromToday } from '@/lib/task-display'
 
 
@@ -518,6 +522,56 @@ export default function Page() {
     // No-op: real-time subscription handles this automatically
   }
 
+  // Voice commands run through the same handlers as the screens, so a spoken
+  // command and a typed one leave the same task behind.
+  const executeVoiceIntent = async (intent: VoiceIntent): Promise<string> => {
+    switch (intent.action) {
+      case "create": {
+        const repeatRule: RepeatRule | undefined =
+          intent.repeat === "daily"
+            ? { kind: "daily", interval: 1 }
+            : intent.repeat === "weekdays"
+              ? { kind: "weekly", days: [1, 2, 3, 4, 5], interval: 1 }
+              : undefined
+
+        await handleAddTask({
+          title: intent.title,
+          type: "text",
+          dueDate: intent.dueDate,
+          alarm: intent.alarm,
+          repeatRule,
+        })
+        return `Görev eklendi: ${intent.title}`
+      }
+      case "complete":
+        await handleToggleComplete(intent.task.id)
+        return `Tamamlandı: ${intent.task.title}`
+      case "delete":
+        await handleDeleteTask(intent.task.id)
+        return `Silindi: ${intent.task.title}`
+      case "update":
+        await handleUpdateTask(intent.task.id, intent.updates)
+        return `Güncellendi: ${intent.task.title}`
+      case "list": {
+        const found = tasks.filter((task) => {
+          if (task.completed) return false
+          if (intent.hasAlarm && !task.alarm) return false
+          if (intent.from && (!task.dueDate || task.dueDate < intent.from)) return false
+          if (intent.to && (!task.dueDate || task.dueDate > intent.to)) return false
+          return true
+        })
+
+        if (found.length === 0) return "Görev yok"
+
+        const titles = found.slice(0, 3).map((task) => task.title).join(", ")
+        const rest = found.length - 3
+        return `${found.length} görev: ${titles}${rest > 0 ? ` ve ${rest} daha` : ""}`
+      }
+      default:
+        return "Sesli komut anlaşılmadı"
+    }
+  }
+
   // Auth loading state
   if (authLoading) {
     return <BootScreen />
@@ -737,6 +791,11 @@ export default function Page() {
         )}
 
         {savingTitle !== null && <XpCopyDialog title={savingTitle} />}
+
+        {/* Voice commands answer in a toast; the mic only lives on My Tasks. */}
+        <VoiceCommand tasks={tasks} execute={executeVoiceIntent} visible={currentScreen === "tasks"} />
+
+        <Toaster position="top-center" richColors closeButton />
 
         {/* Easter Egg Modal - December 20 */}
         {showEasterEgg && (
