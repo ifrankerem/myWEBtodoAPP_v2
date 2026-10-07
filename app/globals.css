@@ -269,6 +269,10 @@
   html,
   body {
     min-height: 100%;
+    /* Android WebView otherwise re-scales text in wide fields, which pushes it
+       out of the fixed-height boxes. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
@@ -938,7 +942,9 @@
 
 .xp-app :is(input[type="text"], input[type="email"], input[type="password"], input[type="date"], input[type="time"], input[type="number"], input[type="search"], select, textarea),
 .xp-field-input {
-  height: 32px;
+  /* Height lives in the two rules below: text areas must not inherit the
+     one-line height, or they clip everything past the first row. */
+  min-height: 32px;
   padding: 0 6px;
   border: 1px solid var(--xp-field-border);
   border-radius: 0;
@@ -947,8 +953,10 @@
   font: 13px var(--font-ui);
   min-width: 0;
 }
+.xp-app :is(input:not(textarea), select) { height: 32px; }
 .xp-addr-field input[type="search"] { border: 0; height: 100%; padding: 0; background: none; }
-.xp-app textarea { height: auto; padding: 5px 6px; resize: none; line-height: 1.4; }
+/* Text areas grow with their text, then scroll inside their max-height. */
+.xp-app textarea { height: auto; padding: 5px 6px; resize: none; line-height: 1.4; overflow-y: auto; overscroll-behavior: contain; }
 .xp-app input:disabled { background: var(--xp-chrome); color: var(--xp-disabled); }
 .xp-app select:not([multiple]) {
   appearance: none;
@@ -957,6 +965,8 @@
   background: var(--xp-field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='28'%3E%3Cdefs%3E%3ClinearGradient id='a' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23c3d6fd'/%3E%3Cstop offset='1' stop-color='%2386a5f0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='.5' y='1.5' width='21' height='25' rx='2' fill='url(%23a)' stroke='%23b2c8f6'/%3E%3Cpath d='M7 12l4 4 4-4' fill='none' stroke='%234d6185' stroke-width='2'/%3E%3C/svg%3E") right 1px center / 22px 28px no-repeat;
 }
 .xp-app :is(input, select, textarea):focus-visible { outline: none; border-color: var(--xp-sel); box-shadow: 0 0 0 1px var(--xp-sel); }
+/* Keeps a focused field clear of the tab strip when the soft keyboard scrolls it into view. */
+.xp-app :is(input, select, textarea) { scroll-margin-block: 56px; }
 
 .xp-groupbox { border: 1px solid var(--xp-gbox-border); border-radius: 4px; padding: 8px 10px 10px; margin: 0; display: grid; gap: 8px; min-width: 0; }
 .xp-groupbox legend { padding: 0 4px; color: var(--xp-legend); }
@@ -1099,7 +1109,9 @@
 /* ---------- properties window ---------- */
 .xp-props { flex: 1; min-height: 0; overflow: auto; padding: 10px 8px 12px; background: var(--xp-chrome); }
 .xp-props-head { display: flex; align-items: center; gap: 12px; }
-.xp-props-head input { flex: 1; }
+.xp-props-head :is(input, textarea) { flex: 1; }
+/* Heights are set by XpAutoTextarea, which grows the box with the text. */
+.xp-props-detail { min-height: 76px; max-height: 45dvh; }
 .xp-rule { height: 0; border-top: 1px solid var(--xp-chrome-line); border-bottom: 1px solid var(--xp-chrome-hi); margin: 2px 0; }
 .xp-kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 8px; margin: 0; }
 .xp-kv dd { margin: 0; }

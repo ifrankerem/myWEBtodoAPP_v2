@@ -8,7 +8,7 @@ import { NO_REPEAT, toLegacyRepeats, toRepeatRule, type RepeatRule } from "@/lib
 import { nextReminderText } from "@/lib/task-display"
 import { compressImage } from "@/lib/storage-idb"
 import { XpIcon } from "@/components/xp-icons"
-import { XpCheckbox, XpDialog, XpMessage, XpWindow } from "@/components/xp-ui"
+import { XpAutoTextarea, XpCheckbox, XpDialog, XpMessage, XpWindow } from "@/components/xp-ui"
 
 type Tab = "general" | "reminder" | "picture"
 
@@ -155,11 +155,21 @@ export default function TaskProperties({
         <div className="xp-tabpanel" role="tabpanel" id="props-panel-general" aria-labelledby="props-tab-general" hidden={tab !== "general"}>
           <div className="xp-props-head">
             {thumb}
-            <input
-              type="text"
+            <XpAutoTextarea
+              className="xp-props-title"
+              maxRows={5}
+              enterKeyHint="done"
               aria-label="Title"
               value={title}
               onChange={(event) => edit(setTitle)(event.target.value)}
+              onKeyDown={(event) => {
+                // A title is one line: Enter moves on to the notes instead of
+                // opening a row the task list will never show.
+                if (event.key !== "Enter" || event.shiftKey) return
+                event.preventDefault()
+                event.currentTarget.blur()
+                document.getElementById("props-details")?.focus()
+              }}
               placeholder="What needs doing?"
               autoFocus={isNew}
             />
@@ -183,7 +193,14 @@ export default function TaskProperties({
           <div className="xp-rule" />
           <div className="xp-pcol">
             <label htmlFor="props-details">Details:</label>
-            <textarea id="props-details" rows={4} value={detail} onChange={(event) => edit(setDetail)(event.target.value)} placeholder="Notes, addresses, lists" />
+            <XpAutoTextarea
+              id="props-details"
+              className="xp-props-detail"
+              enterKeyHint="enter"
+              value={detail}
+              onChange={(event) => edit(setDetail)(event.target.value)}
+              placeholder="Notes, addresses, lists"
+            />
           </div>
           {task && (
             <>
