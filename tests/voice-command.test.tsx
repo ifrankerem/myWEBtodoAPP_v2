@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import VoiceCommand, { useSpeech } from '@/components/voice-command'
 import type { Task } from '@/lib/task'
+import type { VoiceIntent } from '@/lib/voice-intent'
 
 /* ------------------------------------------------------------------ *
  * Plugin mock: @capacitor-community/speech-recognition
@@ -100,7 +101,7 @@ const TASKS = [T1, T2, T7, T8, T9, T10]
 
 const MIC = 'Sesli komut'
 
-function setup(overrides: { visible?: boolean; execute?: ReturnType<typeof vi.fn> } = {}) {
+function setup(overrides: { visible?: boolean; execute?: (intent: VoiceIntent) => Promise<string> } = {}) {
   const execute = overrides.execute ?? vi.fn(async () => 'Tamamlandı')
   const view = render(
     <VoiceCommand tasks={TASKS} execute={execute} visible={overrides.visible ?? true} />

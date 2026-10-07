@@ -41,4 +41,6 @@
     <!-- Task alarms are user-set alarms, so exact scheduling is granted up front
          on Android 13+ instead of sending the user to "Alarms & reminders". -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Voice commands: the speech recognizer needs the microphone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>
