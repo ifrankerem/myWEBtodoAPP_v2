@@ -1,0 +1,249 @@
+import { describe, expect, it } from 'vitest'
+
+import type { Task } from '@/lib/task'
+import { parseVoiceCommand, type VoiceIntent } from '@/lib/voice-intent'
+
+// Wednesday 2026-10-07, built from local parts so no timezone can shift the day.
+const TODAY = new Date(2026, 9, 7)
+
+const CREATED = new Date(2026, 1, 2, 9, 0, 0)
+
+function task(id: string, title: string, dueDate: string): Task {
+  return {
+    id,
+    title,
+    type: 'text',
+    completed: false,
+    createdDate: CREATED,
+    lastEditedDate: CREATED,
+    dueDate,
+  }
+}
+
+const T1 = task('T1', 'Süt al', '2026-10-05')
+const T2 = task('T2', 'Kart al Aleyna', '2026-10-06')
+const T3 = task('T3', 'Lab raporunu teslim et', '2026-10-07')
+const T4 = task('T4', 'Annemi ara', '2026-10-08')
+const T5 = task('T5', 'Elektrik faturasını öde', '2026-10-09')
+// Issue case 14 shifts T7's due date by a week: 2026-10-15 + 7 = 2026-10-22.
+const T7 = task('T7', 'Diş hekimi randevusu', '2026-10-15')
+const T8 = task('T8', 'Spor salonuna git', '2026-10-16')
+const T9 = task('T9', 'Doğum günü hediyesi al', '2026-10-17')
+const T10 = task('T10', 'Berber randevusu', '2026-10-18')
+
+const ALL = [T1, T2, T3, T4, T5, T7, T8, T9, T10]
+
+function parse(text: string, tasks: Task[] = ALL): VoiceIntent {
+  return parseVoiceCommand(text, tasks, TODAY)
+}
+
+describe('parseVoiceCommand create', () => {
+  // Issue case 1
+  it('case 1: takes the title after the marker and adds nothing else', () => {
+    expect(parse('Yeni görev: kahve al')).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Issue case 2
+  it('case 2: strips the weekday as a due date', () => {
+    expect(parse('Görev ekle: cumartesi çöp çıkar')).toEqual({
+      action: 'create',
+      title: 'çöp çıkar',
+      dueDate: '2026-10-10',
+    })
+  })
+
+  // Issue case 3
+  it('case 3: reads "mesajı at" as title text, not as a reschedule verb', () => {
+    expect(parse("Yarın için görev ekle, ablama doğum günü mesajı at")).toEqual({
+      action: 'create',
+      title: 'ablama doğum günü mesajı at',
+      dueDate: '2026-10-08',
+    })
+  })
+
+  // Issue case 4
+  it('case 4: reads weekday, morning time and the alarmlı marker', () => {
+    expect(parse("Pazartesi sabah 9'a alarmlı görev kur, ilaç iç")).toEqual({
+      action: 'create',
+      title: 'ilaç iç',
+      dueDate: '2026-10-12',
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 5
+  it('case 5: reads "her gün" as a daily repeat and keeps the digits in the title', () => {
+    expect(parse('Her gün tekrar eden görev: 50 şınav çek')).toEqual({
+      action: 'create',
+      title: '50 şınav çek',
+      repeat: 'daily',
+    })
+  })
+
+  // Issue case 6
+  it('case 6: reads "hafta içi" as a weekday repeat', () => {
+    expect(parse('Hafta içi tekrar eden görev: vitamin al')).toEqual({
+      action: 'create',
+      title: 'vitamin al',
+      repeat: 'weekdays',
+    })
+  })
+
+  it('falls back to unknown when the marker leaves no title', () => {
+    expect(parse('Yeni görev')).toEqual({ action: 'unknown' })
+  })
+
+  it('adds a week to the named weekday after "gelecek"', () => {
+    const intent = parse('Gelecek çarşamba için görev ekle, kahve al') as Extract<
+      VoiceIntent,
+      { action: 'create' }
+    >
+    expect(intent.action).toBe('create')
+    expect(intent.dueDate).toBe('2026-10-14')
+  })
+})
+
+describe('parseVoiceCommand complete and delete', () => {
+  // Issue case 7
+  it('case 7: completes the task the command wraps', () => {
+    expect(parse('Süt al görevini tamamladım')).toEqual({ action: 'complete', task: T1 })
+  })
+
+  // Issue case 8
+  it('case 8: completes on a single partial match', () => {
+    expect(parse('Elektrik faturası bitti')).toEqual({ action: 'complete', task: T5 })
+  })
+
+  // Issue case 9
+  it('case 9: deletes the task the command wraps', () => {
+    expect(parse('Süt al görevini sil')).toEqual({ action: 'delete', task: T1 })
+  })
+
+  // Issue case 10
+  it('case 10: deletes a title with a spoken case suffix', () => {
+    expect(parse("Kart al Aleyna'yı sil")).toEqual({ action: 'delete', task: T2 })
+  })
+
+  // Issue case 11
+  it('case 11: deletes nothing when no title matches', () => {
+    expect(parse('Alışveriş görevini sil')).toEqual({ action: 'unknown' })
+  })
+
+  // Issue case 12
+  it('case 12: asks which randevusu when two candidates score differently', () => {
+    expect(parse('Randevu görevini sil')).toEqual({
+      action: 'confirm',
+      candidates: [T10, T7],
+      wanted: 'delete',
+    })
+  })
+})
+
+describe('parseVoiceCommand update', () => {
+  // Issue case 13
+  it('case 13: postpones to the named weekday', () => {
+    expect(parse('Lab raporunu teslim et görevini cumaya ertele')).toEqual({
+      action: 'update',
+      task: T3,
+      updates: { dueDate: '2026-10-09' },
+    })
+  })
+
+  // Issue case 14
+  it('case 14: postpones by a week from the task’s own due date', () => {
+    expect(parse('Diş hekimi randevusunu bir hafta ileri al')).toEqual({
+      action: 'update',
+      task: T7,
+      updates: { dueDate: '2026-10-22' },
+    })
+  })
+
+  // Issue case 15
+  it('case 15: sets the alarm from a spoken clock time', () => {
+    expect(parse('Annemi ara görevinin alarmını 20:00 yap')).toEqual({
+      action: 'update',
+      task: T4,
+      updates: { alarm: '20:00' },
+    })
+  })
+
+  // Issue case 16
+  it('case 16: zero-pads the hour of an added alarm', () => {
+    expect(parse('Diş hekimi randevusuna alarm ekle, saat 8:30')).toEqual({
+      action: 'update',
+      task: T7,
+      updates: { alarm: '08:30' },
+    })
+  })
+
+  // Issue case 17
+  it('case 17: renames the task to the words before "yap"', () => {
+    expect(parse('Süt al görevinin adını iki paket süt al yap')).toEqual({
+      action: 'update',
+      task: T1,
+      updates: { title: 'iki paket süt al' },
+    })
+  })
+
+  it('reads an evening hour-only alarm', () => {
+    const intent = parse("Annemi ara görevinin alarmını akşam 8 yap") as Extract<
+      VoiceIntent,
+      { action: 'update' }
+    >
+    expect(intent.action).toBe('update')
+    expect(intent.updates).toEqual({ alarm: '20:00' })
+  })
+
+  it('reads a morning hour-only alarm with the genitive apostrophe', () => {
+    const intent = parse("Annemi ara görevinin alarmını sabah 9'a yap") as Extract<
+      VoiceIntent,
+      { action: 'update' }
+    >
+    expect(intent.action).toBe('update')
+    expect(intent.updates).toEqual({ alarm: '09:00' })
+  })
+})
+
+describe('parseVoiceCommand list', () => {
+  // Issue case 18
+  it('case 18: lists the current week from Monday to Sunday', () => {
+    expect(parse('Bu hafta hangi görevlerim var?')).toEqual({
+      action: 'list',
+      from: '2026-10-05',
+      to: '2026-10-11',
+    })
+  })
+
+  // Issue case 19
+  it('case 19: lists tomorrow as a single day', () => {
+    expect(parse('Yarınki görevlerimi göster')).toEqual({
+      action: 'list',
+      from: '2026-10-08',
+      to: '2026-10-08',
+    })
+  })
+
+  // Issue case 20
+  it('case 20: lists only the tasks that carry an alarm', () => {
+    expect(parse('Alarmlı görevlerim hangileri?')).toEqual({
+      action: 'list',
+      hasAlarm: true,
+    })
+  })
+
+  it('adds no filter to a bare list command', () => {
+    expect(parse('Görevlerim')).toEqual({ action: 'list' })
+  })
+})
+
+describe('parseVoiceCommand unknown', () => {
+  // Issue case 21
+  it('case 21: does not read a question as an intent', () => {
+    expect(parse('Bugün hava nasıl?')).toEqual({ action: 'unknown' })
+  })
+
+  // Issue case 22
+  it('case 22: does not read ordinary speech as an intent', () => {
+    expect(parse("Spotify'da Sezen Aksu çal")).toEqual({ action: 'unknown' })
+  })
+})
