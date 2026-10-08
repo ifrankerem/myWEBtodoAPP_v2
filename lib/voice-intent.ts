@@ -10,7 +10,7 @@
 // ambient locale — so the same command parses the same way on any machine.
 
 import type { Task } from '@/lib/task'
-import { matchTaskTitles } from '@/lib/voice-match'
+import { matchTaskTitles, VOICE_FILLERS } from '@/lib/voice-match'
 
 export type VoiceRepeat = 'daily' | 'weekdays'
 
@@ -67,13 +67,34 @@ const WEEKDAY_DAYS: Record<string, number> = {
   pazar: 0,
 }
 
-const DELETE_VERBS = ['sil', 'kaldır']
+/**
+ * Delete verbs as people say them: `sil`, `siler`, `silebilir`, `silelim`,
+ * `silermisin`. Only the listed tails count, so `silgi` and `silah` stay nouns.
+ */
+const DELETE_STEMS = ['sil', 'kaldır']
+const DELETE_TAILS = ['', 'er', 'ebilir', 'abilir', 'elim', 'in', 'ir']
 const DELETE_PHRASES = [
   ['iptal', 'et'],
   ['yok', 'et'],
 ]
 
-const COMPLETE_VERBS = ['tamamla', 'tamamladım', 'bitir', 'bitirdim', 'bitti', 'yaptım']
+const COMPLETE_VERBS = [
+  'tamamla',
+  'tamamlandı',
+  'tamamladım',
+  'tamamlayabilir',
+  'bitir',
+  'bitirdim',
+  'bitti',
+  'yaptım',
+  'hallettim',
+]
+
+/** The ending a finished verb takes: `kahve aldım` for the task `kahve al`. */
+const PAST_TENSE_TAILS = ['dım', 'dim', 'dum', 'düm', 'tım', 'tim', 'tum', 'tüm']
+
+/** The question tail, which turns a verb into a polite ask. */
+const QUESTION_TAILS = ['misin', 'musun', 'müsün']
 
 const UPDATE_VERBS = ['ertele', 'taşı', 'değiştir', 'yap']
 const UPDATE_PHRASES = [
@@ -92,43 +113,129 @@ const CREATE_MARKERS = [
   ['görev', 'ekle'],
   ['görev', 'oluştur'],
   ['görev', 'kur'],
+  ['hatırlat'],
   ['ekle'],
   ['oluştur'],
 ]
 
-const LIST_WORDS = ['göster', 'listele', 'görevlerim', 'hangi', 'hangileri', 'neler']
+/**
+ * The verbal noun of a create marker names a task, not an action: "ses kaydı
+ * ekleme notu" is a note about adding a recording, and "ekleme" there must not
+ * turn the sentence into a create.
+ */
+const NOT_A_MARKER = ['ekleme', 'oluşturma', 'görevi']
+
+/**
+ * Create markers as people say them, stem plus the tails Turkish adds:
+ * "ekle", "ekler", "ekleyebilir", "ekleyin", "oluşturur musun". Only these tails
+ * count, so the nouns above stay out.
+ */
+const CREATE_STEMS = ['ekle', 'oluştur', 'hatırlat', 'kur']
+const CREATE_TAILS = [
+  '',
+  'r',
+  'ur',
+  'ler',
+  'yebilir',
+  'abilir',
+  'yin',
+  'ylim',
+  'sun',
+  'sin',
+  'sen',
+  'yeyim',
+]
+
+const LIST_WORDS = ['göster', 'listele', 'görevlerim', 'hangi', 'hangileri', 'neler', 'ne', 'var']
+
+/** "saat 9 da", "yarın da": the case suffix belongs to the time or date. */
+const DETACHED_SUFFIXES = ['da', 'de', 'ta', 'te', 'a', 'e', 'ya', 'ye', 'dan', 'den']
+
+/** "bana ... diye hatırlat": the dative opening of a reminder. */
+const REMINDER_OPENERS = ['bana', 'benim']
+
+/** "süt almayı hatırlat": the accusative of a verbal noun, minus the noun. */
+const REMINDER_SUFFIXES = ['mayı', 'meyi']
 
 const REPEATS: Array<{ words: string[]; repeat: VoiceRepeat }> = [
   { words: ['her', 'gün'], repeat: 'daily' },
   { words: ['hafta', 'içi'], repeat: 'weekdays' },
 ]
 
-/** `20:00`, and nothing else — a bare number is a count, not a clock. */
-const CLOCK = /^(\d{1,2}):(\d{2})$/
+/**
+ * A clock time as the recognizer writes it: `9:00`, `9.00`, `21:30`, `21.30`,
+ * each with an optional Turkish case suffix fused on (`9.00da`, `9:00'de` →
+ * `9:00de`). A bare number is a count, not a clock.
+ */
+const CLOCK = /^(\d{1,2})[:.](\d{2})[a-zçğıöşü]*$/
 
 /** An hour with whatever Turkish case suffix follows it: `9`, `9a`, `9de`. */
 const HOUR_WORD = /^(\d{1,2})[a-zçğıöşü]*$/
 
+/** Turkish number words for the hours 1–12, as in "saat dokuzda". */
+const HOUR_NAMES: Record<string, number> = {
+  bir: 1,
+  iki: 2,
+  üç: 3,
+  dört: 4,
+  beş: 5,
+  altı: 6,
+  yedi: 7,
+  sekiz: 8,
+  dokuz: 9,
+  on: 10,
+  onbir: 11,
+  oniki: 12,
+}
+
+/** Hours a part of the day shifts by: "akşam 8" is 20:00, "sabah 9" is 09:00. */
+const PART_OF_DAY: Record<string, number> = {
+  sabah: 0,
+  öğlen: 0,
+  akşam: 12,
+  gece: 12,
+}
+
 // ---------------------------------------------------------------------------
 // Words
+
+/** Stands in for the dot of `9.00` while the sentence marks are stripped. */
+const DOT_PLACEHOLDER = '<dot>'
 
 function tokenKey(raw: string): string {
   return raw
     .toLocaleLowerCase('tr-TR')
+    // The recognizer writes a clock time with a dot (`9.00`); that dot stays.
+    .replace(/(\d)\.(?=\d)/g, `$1${DOT_PLACEHOLDER}`)
     // Keep digits, `:` and letters. The apostrophe belongs to the word
     // (`9'a`), the sentence marks do not.
     .replace(/[.,!?;'"()[\]]/g, '')
+    .replace(/<dot>/g, '.')
     // A colon at the end separates what follows (`görev:`); one inside the
     // token is a clock time (`20:00`).
     .replace(/:+$/, '')
 }
 
+/**
+ * Speech recognition writes `kaydı` where the user typed `kaydi`, and the two
+ * name the same task. Folding is for comparing words only — the title keeps the
+ * spelling the user said.
+ */
+function foldI(word: string): string {
+  return word.replace(/ı/g, 'i')
+}
+
 function tokenize(text: string): Token[] {
   const tokens: Token[] = []
   for (const raw of text.split(/\s+/)) {
-    if (raw !== '') tokens.push({ raw, key: tokenKey(raw) })
+    if (raw !== '') tokens.push({ raw, key: foldI(tokenKey(raw)) })
   }
   return tokens
+}
+
+/** The keys of a stored title, for comparing it against a spoken sentence. */
+function splitWords(text: string): string[] {
+  return tokenize(text).map((token) => token.key)
 }
 
 /**
@@ -138,10 +245,15 @@ function tokenize(text: string): Token[] {
  */
 function matchesWord(key: string | undefined, word: string): boolean {
   if (key === undefined) return false
-  if (key === word) return true
-  if (word.length < 4) return false
-  const suffixLength = key.length - word.length
-  return suffixLength > 0 && suffixLength <= MAX_SUFFIX && key.startsWith(word)
+
+  // Both sides fold: keys are folded on the way in, and the tables below are
+  // written in the spelling a person uses.
+  const spoken = foldI(key)
+  const said = foldI(word)
+  if (spoken === said) return true
+  if (said.length < 4) return false
+  const suffixLength = spoken.length - said.length
+  return suffixLength > 0 && suffixLength <= MAX_SUFFIX && spoken.startsWith(said)
 }
 
 function matchesAnyWord(keys: string[], words: string[]): boolean {
@@ -256,6 +368,17 @@ function withForSuffix(keys: string[], span: Span): Span {
   return matchesWord(keys[after], 'için') ? { start: span.start, length: span.length + 1 } : span
 }
 
+/**
+ * A case suffix spoken on its own belongs to the word before it: "yarın saat 9
+ * da" is tomorrow at nine, not a title starting with "da".
+ */
+function withDetachedSuffix(keys: string[], span: Span): Span {
+  const after = span.start + span.length
+  const next = keys[after]
+  if (next === undefined) return span
+  return DETACHED_SUFFIXES.includes(next) ? { start: span.start, length: span.length + 1 } : span
+}
+
 /** `bir hafta ileri` / `bir hafta sonra`: a week, from wherever it is anchored. */
 function isAWeekLater(keys: string[], index: number): boolean {
   return (
@@ -269,18 +392,52 @@ function isDateWord(key: string | undefined): boolean {
   return matchesWord(key, 'bugün') || matchesWord(key, 'yarın') || weekdayOf(key) !== undefined
 }
 
+/**
+ * What part of the day a word names, and how many words it took to say it, or
+ * undefined when it names none. "öğleden sonra" is two words.
+ */
+function partOfDayAt(keys: string[], index: number): { shift: number; length: number } | undefined {
+  if (matchesWord(keys[index], 'öğleden') && matchesWord(keys[index + 1], 'sonra')) {
+    return { shift: PART_OF_DAY.akşam, length: 2 }
+  }
+
+  for (const [word, shift] of Object.entries(PART_OF_DAY)) {
+    if (matchesWord(keys[index], word)) return { shift, length: 1 }
+  }
+  return undefined
+}
+
 function pad(value: number): string {
   return `${value}`.padStart(2, '0')
 }
 
-/** `20:00` → `20:00`, `8:30` → `08:30`. Rejects anything off the clock. */
-function clockAt(key: string | undefined): string | null {
+/** The hour and minute a clock token carries, or null when it is not a clock. */
+function clockPartsAt(key: string | undefined): { hour: number; minute: number } | null {
   const parts = CLOCK.exec(key ?? '')
   if (!parts) return null
+
   const hour = Number(parts[1])
   const minute = Number(parts[2])
   if (hour > 23 || minute > 59) return null
-  return `${pad(hour)}:${pad(minute)}`
+  return { hour, minute }
+}
+
+/** `20:00` → `20:00`, `8:30` → `08:30`. Rejects anything off the clock. */
+function clockAt(key: string | undefined): string | null {
+  const parts = clockPartsAt(key)
+  if (!parts) return null
+  return `${pad(parts.hour)}:${pad(parts.minute)}`
+}
+
+/**
+ * The hour a part of the day means. The recognizer writes `akşam 8` as
+ * `akşam 8.00`, so a clock gets the same shift a bare hour already did.
+ *
+ * Only 1–11 can move: 13–23 and `00` already name the hour meant, and 12 would
+ * become 24, which is not a time.
+ */
+function shiftedHour(hour: number, shift: number): number {
+  return shift === 12 && hour > 0 && hour < 12 ? hour + shift : hour
 }
 
 /** `9`, `9a`, `9de` → `9`; `50` → null, because fifty o'clock is not a time. */
@@ -292,8 +449,42 @@ function hourAt(key: string | undefined): number | null {
 }
 
 /**
- * A clock time, with the word that introduces it. A bare number stays part of
- * the title — "50 şınav" is not a reminder at half past midnight.
+ * `dokuz`, `dokuza`, `dokuzda` → `9`; also the eleven and twelve the recognizer
+ * writes as one word or as two, `on bir` and `onbir`.
+ */
+function hourNameAt(keys: string[], index: number): { hour: number; length: number } | null {
+  const key = keys[index]
+  if (key === undefined) return null
+
+  // Strip a case suffix the way Turkish attaches it: "dokuz" + "da" → "dokuzda".
+  for (const [name, hour] of Object.entries(HOUR_NAMES)) {
+    const spoken = foldI(key)
+    if (spoken === name || (spoken.startsWith(name) && spoken.length - name.length <= MAX_SUFFIX)) {
+      return { hour, length: 1 }
+    }
+  }
+
+  // "on bir" arrives as two words, and the suffix lands on the second.
+  if (foldI(key) === 'on') {
+    const rest = hourNameAt(keys, index + 1)
+    if (rest !== null && rest.hour >= 1 && rest.hour <= 2) return { hour: 10 + rest.hour, length: 2 }
+  }
+
+  return null
+}
+
+/** The hour a token carries, as digits or as a number word, or null. */
+function spokenHourAt(keys: string[], index: number): { hour: number; length: number } | null {
+  const digits = hourAt(keys[index])
+  if (digits !== null) return { hour: digits, length: 1 }
+  return hourNameAt(keys, index)
+}
+
+/**
+ * A clock time, with the words that introduce it. A bare number stays part of
+ * the title — "50 şınav" is not a reminder at half past midnight, and "iki süt
+ * al" is not a reminder at two either. A number word counts only after `saat` or
+ * a part of the day, so the title keeps the ones that are not hours.
  */
 function timeAt(keys: string[], index: number): TimeSpan | null {
   const key = keys[index]
@@ -301,20 +492,59 @@ function timeAt(keys: string[], index: number): TimeSpan | null {
   if (matchesWord(key, 'saat')) {
     const clock = clockAt(keys[index + 1])
     if (clock) return { start: index, length: 2, time: clock }
-    const hour = hourAt(keys[index + 1])
-    if (hour !== null) return { start: index, length: 2, time: `${pad(hour)}:00` }
+
+    const hour = spokenHourAt(keys, index + 1)
+    if (hour !== null) return { start: index, length: 1 + hour.length, time: `${pad(hour.hour)}:00` }
     return null
+  }
+
+  // A part of the day belongs to the time after it, and is spent with it rather
+  // than left in the title. It shifts the hour as it does for "akşam 8", because
+  // a 12-hour clock after "akşam" is that hour in the evening: "akşam 8.00" is
+  // 20:00 while "akşam 20.00" is already the evening hour.
+  const part = partOfDayAt(keys, index)
+  if (part !== undefined) {
+    const after = index + part.length
+
+    const clock = clockPartsAt(keys[after])
+    if (clock) {
+      const hour = shiftedHour(clock.hour, part.shift)
+      return { start: index, length: part.length + 1, time: `${pad(hour)}:${pad(clock.minute)}` }
+    }
+
+    const hour = spokenHourAt(keys, after)
+    if (hour === null) return null
+    return {
+      start: index,
+      length: part.length + hour.length,
+      time: `${pad(shiftedHour(hour.hour, part.shift))}:00`,
+    }
   }
 
   const clock = clockAt(key)
   if (clock) return { start: index, length: 1, time: clock }
 
-  const isEvening = matchesWord(key, 'akşam')
-  if (isEvening || matchesWord(key, 'sabah')) {
-    const hour = hourAt(keys[index + 1])
-    if (hour === null) return null
-    const spoken = isEvening && hour < 12 ? hour + 12 : hour
-    return { start: index, length: 2, time: `${pad(spoken)}:00` }
+  return null
+}
+
+/**
+ * What a bare number word or digit counts as, right after `saat` or a part of
+ * the day: `dokuzda` is nine, and nothing else is a time here.
+ */
+function bareTimeAt(keys: string[], index: number): TimeSpan | null {
+  const key = keys[index]
+  if (key === undefined) return null
+
+  // A clock needs no help: "9.00", "9:00" and "21.30" are times wherever they
+  // stand, since no title of a task contains one.
+  const clock = clockAt(key)
+  if (clock) return { start: index, length: 1, time: clock }
+
+  // "9'da" arrives as "9da": a bare hour with its case suffix. A bare "9"
+  // without one is a count, as in "50 şınav".
+  if (HOUR_WORD.test(key) && key.length > 1) {
+    const hour = hourAt(key)
+    if (hour !== null) return { start: index, length: 1, time: `${pad(hour)}:00` }
   }
 
   return null
@@ -332,11 +562,73 @@ function repeatAt(keys: string[], index: number): (Span & { repeat: VoiceRepeat 
 // ---------------------------------------------------------------------------
 // Flows
 
+/**
+ * Whether a word asks to create: `ekle`, `ekler misin`, `ekleyebilir misin`,
+ * `oluşturur musun`. Only the listed verb tails count, so the nouns above and
+ * words like `ekşi` stay out.
+ */
+function isCreateVerb(key: string | undefined): boolean {
+  if (key === undefined) return false
+  if (NOT_A_MARKER.some((noun) => matchesWord(key, noun))) return false
+
+  for (const stem of CREATE_STEMS) {
+    if (!key.startsWith(stem)) continue
+
+    const tail = key.slice(stem.length)
+    for (const ending of CREATE_TAILS) {
+      if (tail === ending) return true
+      // A question fused onto the verb: "eklermisin", "oluştururmusun".
+      const question = tail.slice(ending.length)
+      if (QUESTION_TAILS.some((asked) => question === asked)) return true
+    }
+  }
+  return false
+}
+
 function createAt(keys: string[], index: number): Span | null {
+  // The question particle that may follow — "ekler misin" — is a filler word,
+  // so it drops out of the title on its own and needs no span here.
+  if (isCreateVerb(keys[index])) return { start: index, length: 1 }
+
   for (const marker of CREATE_MARKERS) {
     if (phraseAt(keys, index, marker)) return { start: index, length: marker.length }
   }
   return null
+}
+
+/**
+ * Whether a word asks to delete: `sil`, `siler misin`, `silermisin`,
+ * `silebilir`. Only the listed verb tails count, so `silgi`, `silah` and `silik`
+ * stay nouns and can be part of a title.
+ */
+function isDeleteVerb(key: string | undefined): boolean {
+  if (key === undefined) return false
+  for (const stem of DELETE_STEMS) {
+    if (!key.startsWith(stem)) continue
+
+    const tail = key.slice(stem.length)
+    for (const ending of DELETE_TAILS) {
+      if (tail === ending) return true
+      // A question fused onto the verb: "silermisin", "silebilirmisin".
+      const question = tail.slice(ending.length)
+      if (QUESTION_TAILS.some((asked) => question === asked)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * The finished form of a task's own verb: "kahve aldım" for the task "kahve al".
+ * The sentence is the title with its last word turned into the past tense.
+ */
+function isPastTenseOf(keys: string[], titleWords: string[]): boolean {
+  if (titleWords.length === 0 || titleWords.length !== keys.length) return false
+
+  const last = titleWords[titleWords.length - 1]
+  const finished = PAST_TENSE_TAILS.some((tail) => last + tail === keys[keys.length - 1])
+  if (!finished) return false
+
+  return keys.slice(0, -1).every((key, index) => key === titleWords[index])
 }
 
 function isUpdateCommand(keys: string[]): boolean {
@@ -354,8 +646,21 @@ function isListCommand(keys: string[]): boolean {
 function remainingTitle(tokens: Token[], claimed: boolean[]): string {
   const words: string[] = []
   tokens.forEach((token, index) => {
-    if (!claimed[index]) words.push(token.raw)
+    if (claimed[index] || VOICE_FILLERS.includes(token.key)) return
+    if (REMINDER_OPENERS.includes(token.key)) return
+    words.push(token.raw)
   })
+
+  const title = words.join(' ').replace(/^[\s:;,]+/, '').trim()
+
+  // "süt almayı hatırlat" asks for the task "süt al": the reminder carries the
+  // accusative of a verbal noun, which is not part of the name.
+  const last = words.length - 1
+  const ending = words[last]
+  const suffix = REMINDER_SUFFIXES.find((tail) => ending !== undefined && ending.endsWith(tail))
+  if (suffix === undefined || ending === undefined) return title
+
+  words[last] = ending.slice(0, -suffix.length)
   return words.join(' ').replace(/^[\s:;,]+/, '').trim()
 }
 
@@ -367,10 +672,17 @@ function parseCreate(tokens: Token[], keys: string[], today: Date): VoiceIntent 
   claim(claimed, marker)
 
   const date = findSpan(keys, (index) => dateAt(keys, index, today), claimed)
-  if (date) claim(claimed, withForSuffix(keys, date))
+  if (date) claim(claimed, withDetachedSuffix(keys, withForSuffix(keys, date)))
 
-  const time = findSpan(keys, (index) => timeAt(keys, index), claimed)
-  if (time) claim(claimed, time)
+  // Every create marker in the sentence is spent, not just the first: "yeni
+  // görev ekle kahve al" holds two of them and neither belongs to the title.
+  for (let marker = findSpan(keys, (index) => createAt(keys, index), claimed); marker; ) {
+    claim(claimed, marker)
+    marker = findSpan(keys, (index) => createAt(keys, index), claimed)
+  }
+
+  const time = findSpan(keys, (index) => timeAt(keys, index) ?? bareTimeAt(keys, index), claimed)
+  if (time) claim(claimed, withDetachedSuffix(keys, time))
 
   const repeat = findSpan(keys, (index) => repeatAt(keys, index), claimed)
   if (repeat) claim(claimed, repeat)
@@ -396,14 +708,21 @@ function parseCreate(tokens: Token[], keys: string[], today: Date): VoiceIntent 
 function parseList(keys: string[], today: Date): VoiceIntent {
   const intent: ListIntent = { action: 'list' }
 
+  const named = (word: string) =>
+    findSpan(keys, (index) => (matchesWord(keys[index], word) ? { start: index, length: 1 } : null))
+
   if (hasPhrase(keys, ['bu', 'hafta'])) {
     const monday = addDays(today, -((today.getDay() + 6) % 7))
     intent.from = toDateString(monday)
     intent.to = toDateString(addDays(monday, 6))
-  } else if (findSpan(keys, (index) => (matchesWord(keys[index], 'yarın') ? { start: index, length: 1 } : null))) {
+  } else if (named('yarın')) {
     const tomorrow = toDateString(addDays(today, 1))
     intent.from = tomorrow
     intent.to = tomorrow
+  } else if (named('bugün')) {
+    // "bugün ne var" asks about today alone, like "yarınki görevlerim".
+    intent.from = toDateString(today)
+    intent.to = toDateString(today)
   }
 
   if (findSpan(keys, (index) => (matchesWord(keys[index], 'alarmlı') ? { start: index, length: 1 } : null))) {
@@ -485,9 +804,17 @@ export function parseVoiceCommand(text: string, tasks: Task[], today: Date): Voi
   const keys = tokens.map((token) => token.key)
   if (keys.length === 0) return { action: 'unknown' }
 
-  if (matchesAnyWord(keys, DELETE_VERBS) || DELETE_PHRASES.some((phrase) => hasPhrase(keys, phrase))) {
+  // A delete or complete verb outranks a create marker: "ses kaydi ekleme
+  // notunu siler misin" deletes the note about adding a recording, it does not
+  // create a task called "ses kaydi ekleme notunu siler misin".
+  if (keys.some((key) => isDeleteVerb(key)) || DELETE_PHRASES.some((phrase) => hasPhrase(keys, phrase))) {
     return resolveFlow('delete', text, tasks, tokens, keys, today)
   }
+
+  // "kahve aldım" is the finished form of the task "kahve al", so the sentence
+  // can complete a task without naming a complete verb at all.
+  const finishedTask = tasks.find((task) => isPastTenseOf(keys, splitWords(task.title)))
+  if (finishedTask !== undefined) return { action: 'complete', task: finishedTask }
 
   if (matchesAnyWord(keys, COMPLETE_VERBS)) {
     return resolveFlow('complete', text, tasks, tokens, keys, today)
@@ -497,7 +824,7 @@ export function parseVoiceCommand(text: string, tasks: Task[], today: Date): Voi
     return resolveFlow('update', text, tasks, tokens, keys, today)
   }
 
-  if (findSpan(keys, (index) => createAt(keys, index))) {
+  if (findSpan(keys, (index) => createAt(keys, index)) || keys.some((key) => isCreateVerb(key))) {
     return parseCreate(tokens, keys, today)
   }
 

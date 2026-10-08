@@ -36,8 +36,49 @@ const COMMAND_WORDS = [
   'görevlerim',
 ]
 
-/** Normalized so the set cannot drift from `normalizeTr` by a dotted/dotless typo. */
-const STOPWORDS = new Set(COMMAND_WORDS.map((word) => normalizeTr(word)))
+/**
+ * Turkish function words that never belong to a task: politeness, pronouns, the
+ * tail of a question and the words that link a note to its name. A task called
+ * "Bir" must not be found by the command "lütfen bir".
+ */
+export const VOICE_FILLERS = [
+  'not',
+  'notu',
+  'notunu',
+  'notum',
+  'notumu',
+  'lütfen',
+  'bir',
+  'şu',
+  'şunu',
+  'bu',
+  'bunu',
+  'misin',
+  'mısın',
+  'musun',
+  'müsün',
+  'mi',
+  'mı',
+  'mu',
+  'mü',
+  'adlı',
+  'isimli',
+  'diye',
+]
+
+/**
+ * Speech recognition writes `kaydı` where the user typed `kaydi`, and the two
+ * name the same task. Folding happens when words are compared, never in
+ * `normalizeTr`, so the text a title keeps is the one the user said.
+ */
+function foldI(word: string): string {
+  return word.replace(/ı/g, 'i')
+}
+
+/** Normalized and folded so neither list can drift from `normalizeTr`. */
+const STOPWORDS = new Set(
+  [...COMMAND_WORDS, ...VOICE_FILLERS].map((word) => foldI(normalizeTr(word)))
+)
 
 /**
  * Below four characters a prefix says nothing: `al` is the start of `alışveriş`,
@@ -69,7 +110,7 @@ export function normalizeTr(text: string): string {
 
 function splitWords(text: string): string[] {
   const normalized = normalizeTr(text)
-  return normalized === '' ? [] : normalized.split(' ')
+  return normalized === '' ? [] : normalized.split(' ').map(foldI)
 }
 
 function commonPrefixLength(a: string, b: string): number {

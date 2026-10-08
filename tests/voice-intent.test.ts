@@ -247,3 +247,296 @@ describe('parseVoiceCommand unknown', () => {
     expect(parse("Spotify'da Sezen Aksu çal")).toEqual({ action: 'unknown' })
   })
 })
+
+describe('parseVoiceCommand natural Turkish', () => {
+  // Thursday 2026-10-08, midday, built from local parts so no timezone shifts it.
+  const THURSDAY = new Date(2026, 9, 8, 12, 0, 0)
+
+  const A = task('A', 'ses kaydi ekleme', '2026-10-08')
+  const B = task('B', 'kahve al', '2026-10-08')
+  const C = task('C', 'vivado indirbak', '2026-10-08')
+  const D = task('D', 'Süt al', '2026-10-08')
+
+  const ABC = [A, B, C]
+
+  function say(text: string, tasks: Task[] = ABC): VoiceIntent {
+    return parseVoiceCommand(text, tasks, THURSDAY)
+  }
+
+  // Issue case 1
+  it('case 1: deletes the task whose title ends in ekleme', () => {
+    expect(say('ses kaydi ekleme notunu siler misin')).toEqual({ action: 'delete', task: A })
+  })
+
+  // Issue case 2
+  it('case 2: reads the same sentence with a dotted ı in kaydı', () => {
+    expect(say('ses kaydı ekleme notunu siler misin')).toEqual({ action: 'delete', task: A })
+  })
+
+  // Issue case 3
+  it('case 3: reads "silebilir misin" as a delete verb', () => {
+    expect(say('kahve alı silebilir misin')).toEqual({ action: 'delete', task: B })
+  })
+
+  // Issue case 4
+  it('case 4: reads "silermisin" as a delete verb', () => {
+    expect(say('kahve al görevini silermisin')).toEqual({ action: 'delete', task: B })
+  })
+
+  // Issue case 5
+  it('case 5: does not read "silgi" as a delete verb', () => {
+    expect(say('silgi al ekle', [])).toEqual({ action: 'create', title: 'silgi al' })
+  })
+
+  // Issue case 6
+  it('case 6: reads the past tense of the title verb as completing it', () => {
+    expect(say('kahve aldım')).toEqual({ action: 'complete', task: B })
+  })
+
+  // Issue case 7
+  it('case 7: completes on "tamamlandı"', () => {
+    expect(say('kahve al tamamlandı')).toEqual({ action: 'complete', task: B })
+  })
+
+  // Issue case 8
+  it('case 8: completes on "hallettim"', () => {
+    expect(say('vivado indirbak görevini hallettim')).toEqual({ action: 'complete', task: C })
+  })
+
+  // Issue case 9
+  it('case 9: reads a detached "da" as part of the time', () => {
+    expect(say('yarın saat 9 da diş hekimi ekle', [])).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: '2026-10-09',
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 10
+  it('case 10: creates from "hatırlat"', () => {
+    expect(say('süt almayı hatırlat', [])).toEqual({ action: 'create', title: 'süt al' })
+  })
+
+  // Issue case 11
+  it('case 11: creates from "bana ... diye hatırlat" with a date', () => {
+    expect(say('bana yarın ekmek al diye hatırlat', [])).toEqual({
+      action: 'create',
+      title: 'ekmek al',
+      dueDate: '2026-10-09',
+    })
+  })
+
+  // Issue case 12
+  it('case 12: lists today from "bugün ne var"', () => {
+    expect(say('bugün ne var', [])).toEqual({
+      action: 'list',
+      from: '2026-10-08',
+      to: '2026-10-08',
+    })
+  })
+
+  // Issue case 13
+  it('case 13: ignores the "lütfen" in a delete command', () => {
+    expect(say('lütfen süt al görevini sil', [D])).toEqual({ action: 'delete', task: D })
+  })
+
+  // Issue case 15
+  it('case 15: keeps reading a plain create marker as a create', () => {
+    expect(say('Yeni görev kahve al', [])).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Behaviour rule 1: "silik" and "silah" are not delete verbs.
+  it('does not read silah or silik as a delete verb', () => {
+    expect(say('silah', [task('S1', 'silah', '2026-10-08')])).toEqual({ action: 'unknown' })
+    expect(say('silik', [task('S2', 'silik', '2026-10-08')])).toEqual({ action: 'unknown' })
+  })
+})
+
+describe('parseVoiceCommand polite create markers', () => {
+  // Thursday 2026-10-08, midday, built from local parts so no timezone shifts it.
+  const THURSDAY = new Date(2026, 9, 8, 12, 0, 0)
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], THURSDAY)
+  }
+
+  // Issue case 16
+  it('case 16: spends "ekler misin" instead of keeping it in the title', () => {
+    expect(say('Yeni görev ekler misin kahve al')).toEqual({
+      action: 'create',
+      title: 'kahve al',
+    })
+  })
+
+  // Issue case 17
+  it('case 17: spends every create marker word in the sentence', () => {
+    expect(say('yeni görev ekle kahve al')).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Issue case 18
+  it('case 18: spends "ekleyebilir misin" wherever it sits', () => {
+    expect(say('kahve al ekleyebilir misin')).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Issue case 19
+  it('case 19: spends "oluşturur musun" as a create marker', () => {
+    expect(say('yeni görev oluşturur musun süt al')).toEqual({
+      action: 'create',
+      title: 'süt al',
+    })
+  })
+})
+
+describe('parseVoiceCommand spoken times', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 20
+  it('case 20: reads "9.00\'da" as a time and spends it', () => {
+    expect(say("Yarın saat 9.00'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 21
+  it('case 21: reads "9:00\'da" as a time and spends it', () => {
+    expect(say("yarın saat 9:00'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 22
+  it('case 22: reads the hour word "dokuzda" as a time', () => {
+    expect(say('yarın saat dokuzda diş hekimi ekle')).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 23
+  it('case 23: reads a bare "9\'da" as a time', () => {
+    expect(say("yarın 9'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 24
+  it('case 24: reads "21.30 da" with the suffix detached', () => {
+    expect(say('yarın saat 21.30 da toplantı ekle')).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '21:30',
+    })
+  })
+
+  // Issue case 25
+  it('case 25: keeps an hour word that is not a time in the title', () => {
+    expect(say('iki süt al ekle')).toEqual({ action: 'create', title: 'iki süt al' })
+  })
+})
+
+describe('parseVoiceCommand part of day before a time', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 26
+  it('case 26: spends "akşam" in front of a clock time', () => {
+    expect(say("Yarın akşam 20.00'de toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '20:00',
+    })
+  })
+
+  // Issue case 27
+  it('case 27: spends "sabah" in front of a clock time', () => {
+    expect(say("yarın sabah 9.00'da koşu ekle")).toEqual({
+      action: 'create',
+      title: 'koşu',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 28
+  it('case 28: keeps a part of day that no time follows', () => {
+    expect(say('akşam yemeği ekle')).toEqual({ action: 'create', title: 'akşam yemeği' })
+  })
+})
+
+describe('parseVoiceCommand 12-hour clock after a part of day', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 29
+  it('case 29: reads "akşam 8.00\'de" as twenty o\'clock', () => {
+    expect(say("Yarın akşam 8.00'de toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '20:00',
+    })
+  })
+
+  // Issue case 30
+  it('case 30: reads "öğleden sonra 3.00\'te" as fifteen o\'clock', () => {
+    expect(say("yarın öğleden sonra 3.00'te toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '15:00',
+    })
+  })
+
+  // Issue case 31
+  it('case 31: shifts "gece 11.30" and keeps the minutes', () => {
+    expect(say("yarın gece 11.30'da ilaç ekle")).toEqual({
+      action: 'create',
+      title: 'ilaç',
+      dueDate: TOMORROW,
+      alarm: '23:30',
+    })
+  })
+
+  // Issue case 32
+  it('case 32: still reads "sabah 9.00\'da" as nine o\'clock', () => {
+    expect(say("yarın sabah 9.00'da koşu ekle")).toEqual({
+      action: 'create',
+      title: 'koşu',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+})
