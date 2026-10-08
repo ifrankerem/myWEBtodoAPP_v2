@@ -2,11 +2,19 @@
 
 // In-app voice control for the tasks screen.
 //
-// The speech plugin only reports the words it is still hearing: there is no
-// "the sentence is over" event, so the last thing it says is the command. The
-// hook keeps that text, the component turns it into an intent with the parser
-// from `lib/voice-intent`, and hands the intent to the page, which owns the
-// task handlers. Nothing here touches storage.
+// The speech plugin streams the words it is still hearing, so "Yeni görev
+// kahve" arrives before the user has finished saying "kahve al". Running every
+// partial would create a task per fragment and toast that half a sentence made
+// no sense. The hook keeps the words, this component holds them still for
+// SETTLE_MS and only then turns the sentence into an intent with the parser
+// from `lib/voice-intent`, handing the intent to the page, which owns the task
+// handlers. Nothing here touches storage.
+//
+// A turn starts with each tap and runs one command. That is not only tidiness:
+// on this device the plugin reports the turn ended before the last words arrive
+// ("stopped" comes from onEndOfSpeech, the rest from onResults), so an ended
+// turn says nothing about whether the sentence is complete — only the silence
+// after the words does.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
@@ -23,6 +31,9 @@ const PLUGIN = "SpeechRecognition"
 /** Turkish is the language the parser reads. */
 const LANGUAGE = "tr-TR"
 
+/** How long the transcript must hold still before it counts as the whole command. */
+const SETTLE_MS = 900
+
 const UNKNOWN = "Sesli komut anlaşılmadı"
 const AMBIGUOUS_UPDATE = "Hangi görev olduğunu belirt"
 
@@ -38,21 +49,23 @@ function firstMatch(matches: string[] | undefined): string {
 /** RECORD_AUDIO on Android, the microphone on iOS, asked for on first use. */
 async function ensurePermission(): Promise<boolean> {
   const current = await SpeechRecognition.checkPermissions()
-  if (current.speechRecognition === "granted") return true
+  if (current?.speechRecognition === "granted") return true
 
   const asked = await SpeechRecognition.requestPermissions()
-  return asked.speechRecognition === "granted"
+  return asked?.speechRecognition === "granted"
 }
 
 /**
  * Wraps the speech plugin. `supported` is false on the web, where the button
- * stays hidden; `transcript` holds the words spoken so far.
+ * stays hidden; `transcript` holds the words spoken so far and `settled` counts
+ * the turns the plugin reported as finished.
  */
 export function useSpeech(): {
   supported: boolean
   listening: boolean
   transcript: string
   error: string | null
+  settled: number
   start: () => Promise<void>
   stop: () => void
 } {
@@ -60,6 +73,7 @@ export function useSpeech(): {
   const [listening, setListening] = useState(false)
   const [transcript, setTranscript] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [settled, setSettled] = useState(0)
   const listenerRef = useRef<{ remove: () => Promise<void> } | null>(null)
 
   useEffect(() => {
@@ -68,7 +82,7 @@ export function useSpeech(): {
     let alive = true
     void SpeechRecognition.available()
       .then((result) => {
-        if (alive) setSupported(result.available === true)
+        if (alive) setSupported(result?.available === true)
       })
       .catch(() => {
         if (alive) setSupported(false)
@@ -87,13 +101,14 @@ export function useSpeech(): {
       if (!(await ensurePermission())) throw new Error("Mikrofon izni verilmedi")
 
       const partials = await SpeechRecognition.addListener("partialResults", (data) => {
-        setTranscript(firstMatch(data.matches))
+        setTranscript(firstMatch(data?.matches))
       })
 
       // With `partialResults` the plugin resolves `start()` straight away and
       // keeps sending words, so the state that ends the turn is the plugin's.
       const state = await SpeechRecognition.addListener("listeningState", (data) => {
-        setListening(data.status === "started")
+        setListening(data?.status === "started")
+        if (data?.status === "stopped") setSettled((turns) => turns + 1)
       })
       listenerRef.current = {
         remove: async () => {
@@ -109,8 +124,10 @@ export function useSpeech(): {
         maxResults: 1,
       })
 
-      // Without partial results the sentence arrives here instead.
-      const spoken = firstMatch(result.matches)
+      // Without partial results the sentence arrives here instead. This device
+      // resolves nothing at all when partials are on, so the fields are read
+      // as if they may be missing.
+      const spoken = firstMatch(result?.matches)
       if (spoken !== "") {
         setTranscript(spoken)
         setListening(false)
@@ -126,12 +143,13 @@ export function useSpeech(): {
     listenerRef.current = null
     void listener?.remove()
 
+    // The last words stay: the plugin ends the turn right after this, and the
+    // settle logic runs what was heard.
     setListening(false)
-    setTranscript("")
     void Promise.resolve(SpeechRecognition.stop()).catch(() => undefined)
   }, [])
 
-  return { supported, listening, transcript, error, start, stop }
+  return { supported, listening, transcript, error, settled, start, stop }
 }
 
 type ConfirmIntent = Extract<VoiceIntent, { action: "confirm" }>
@@ -148,30 +166,37 @@ export default function VoiceCommand({
   const { supported, listening, transcript, error, start, stop } = useSpeech()
   const [pending, setPending] = useState<ConfirmIntent | null>(null)
 
-  // The parser needs the task list as it is when the words were spoken, and
-  // the effect below must not re-run for a list that changed afterwards.
+  // The parser needs the task list and the handler as they are when the words
+  // were spoken, so neither a settling timer nor a later task list re-runs them.
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
+  const executeRef = useRef(execute)
+  executeRef.current = execute
 
-  // One utterance, one command: the plugin delivers the same sentence twice,
-  // once as its result and once as the last partial.
-  const handledRef = useRef("")
+  /** Set once this turn's command ran, so the words that keep arriving are ignored. */
+  const spentRef = useRef(false)
+  /** Set once this turn has words of its own, which tells the plugin's result
+      from a partial it streams after the turn ended. */
+  const heardRef = useRef(false)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    if (!error) return
-    toast.error(error)
-  }, [error])
+  // Read inside the settle effect, which must not re-run when listening flips.
+  const listeningRef = useRef(listening)
+  listeningRef.current = listening
 
-  useEffect(() => {
-    const spoken = transcript.trim()
-    if (spoken === "") {
-      handledRef.current = ""
-      return
-    }
-    if (spoken === handledRef.current) return
-    handledRef.current = spoken
+  const clearSettle = useCallback(() => {
+    if (settleTimerRef.current === null) return
+    clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = null
+  }, [])
 
-    const intent = parseVoiceCommand(spoken, tasksRef.current, new Date())
+  const runCommand = useCallback((spoken: string) => {
+    const text = spoken.trim()
+    // One turn, one command: the plugin keeps sending words after it ran.
+    if (text === "" || spentRef.current) return
+    spentRef.current = true
+
+    const intent = parseVoiceCommand(text, tasksRef.current, new Date())
 
     if (intent.action === "unknown") {
       toast.error(UNKNOWN)
@@ -183,17 +208,70 @@ export default function VoiceCommand({
       return
     }
 
-    void execute(intent).then((message) => toast.success(message))
-  }, [transcript, execute])
+    void executeRef.current(intent).then((message) => toast.success(message))
+  }, [])
 
-  // Walking away from the screen leaves no recognizer running behind it.
-  const listeningRef = useRef(listening)
-  listeningRef.current = listening
+  /** Wait for the words to hold still, then run them; restarts on every change. */
+  const armSettle = useCallback(
+    (spoken: string) => {
+      const timer = setTimeout(() => {
+        settleTimerRef.current = null
+        runCommand(spoken)
+      }, SETTLE_MS)
+      settleTimerRef.current = timer
+
+      return () => {
+        clearTimeout(timer)
+        if (settleTimerRef.current === timer) settleTimerRef.current = null
+      }
+    },
+    [runCommand]
+  )
 
   useEffect(() => {
-    if (visible || !listeningRef.current) return
-    stop()
-  }, [visible, stop])
+    if (!error) return
+    toast.error(error)
+  }, [error])
+
+  useEffect(() => {
+    const spoken = transcript.trim()
+
+    // A new turn opens with an empty transcript, so the same words may be spoken
+    // again.
+    if (spoken === "") {
+      spentRef.current = false
+      heardRef.current = false
+      return
+    }
+
+    // The turn's one command has already run.
+    if (spentRef.current) return
+
+    // Anything after the first words of a turn is the plugin still sending the
+    // sentence, even when it has already reported the turn ended. Those wait.
+    if (heardRef.current) return armSettle(spoken)
+    heardRef.current = true
+
+    // A plugin with nothing to stream hands the whole sentence over in start()'s
+    // result instead, and there is nothing left to settle.
+    if (!listeningRef.current) {
+      runCommand(spoken)
+      return
+    }
+
+    return armSettle(spoken)
+  }, [transcript, armSettle, runCommand])
+
+  // Walking away from the screen leaves no recognizer running behind it, and
+  // nothing half-said may act on tasks the user can no longer see.
+  useEffect(() => {
+    if (visible) return
+    // Drop the turn: `stop()` below ends listening, and the words must be spent
+    // so that nothing is left for it to run.
+    clearSettle()
+    spentRef.current = true
+    if (listeningRef.current) stop()
+  }, [visible, stop, clearSettle])
 
   useEffect(() => stop, [stop])
 

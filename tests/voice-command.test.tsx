@@ -128,7 +128,11 @@ async function sayPartial(text: string) {
   for (let attempt = 0; attempt < 50 && !speech.listeners.has('partialResults'); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
-  speech.emit('partialResults', { matches: [text] })
+  // Inside act, so the component has the new words before the test starts
+  // waiting: the settle window starts from this moment.
+  await act(async () => {
+    speech.emit('partialResults', { matches: [text] })
+  })
 }
 
 /**
@@ -167,6 +171,27 @@ async function flush() {
   await act(async () => {
     await Promise.resolve()
   })
+}
+
+/** Let real time pass, so the settle window can open or close. */
+async function wait(ms: number) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  })
+}
+
+/** Toasts that report a command the parser did not understand. */
+function unknownToasts(): string[] {
+  return toastMessages().filter((message) => message.includes('anlaşılmadı'))
+}
+
+/** Feed the growing words of one sentence, the way the plugin streams them. */
+async function speakParts(texts: string[], gapMs = 60) {
+  for (const text of texts) {
+    await sayPartial(text)
+    await wait(gapMs)
+  }
+  await flush()
 }
 
 beforeEach(() => {
@@ -370,5 +395,189 @@ describe('useSpeech', () => {
     await waitFor(() => expect(toastMessages().length).toBeGreaterThan(0))
     expect(execute).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: MIC })).toBeInTheDocument()
+  })
+
+  it('counts every finished turn in the settled counter', async () => {
+    const { result } = renderHook(() => useSpeech())
+    const settled = () => (result.current as { settled?: number }).settled
+
+    await act(async () => {
+      await result.current.start()
+    })
+    expect(settled()).toBe(0)
+
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    expect(settled()).toBe(1)
+
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    expect(settled()).toBe(2)
+  })
+})
+
+describe('VoiceCommand settle', () => {
+  const SENTENCE = 'Yeni görev kahve al'
+
+  async function startListening(execute: (intent: VoiceIntent) => Promise<string>) {
+    const user = userEvent.setup()
+    setup({ execute })
+    keepListening()
+    await user.click(await screen.findByRole('button', { name: MIC }))
+  }
+
+  // Issue case 1
+  it('case 1: runs the finished sentence once, never the half-heard ones', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    await startListening(execute)
+
+    await speakParts(['Yeni', 'Yeni görev', 'Yeni görev kahve', SENTENCE])
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+    expect(unknownToasts()).toHaveLength(0)
+  })
+
+  // Issue case 2, revised: on a device `stopped` arrives before the last words.
+  it('case 2: runs only the words that settle after the turn ended', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: deneme görevi')
+    await startListening(execute)
+
+    await sayPartial('Yeni görev')
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await speakParts(['Yeni görev deneme', 'Yeni görev deneme görevi'], 40)
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'deneme görevi' })
+    expect(unknownToasts()).toHaveLength(0)
+  })
+
+  // Issue case 3, revised: a turn runs one command, whatever arrives later.
+  it('case 3: ignores a later partial once the turn already ran', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: deneme görevi')
+    await startListening(execute)
+
+    await sayPartial('Yeni görev deneme görevi')
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    // Later in the same turn, after the turn's own settle window has passed.
+    await wait(600)
+    await sayPartial('Yeni görev deneme görevi.')
+    await wait(1000)
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  // Issue case 4, revised: the unknown sentence waits for the settle window too.
+  it('case 4: reports an unknown sentence once, after the settle window', async () => {
+    const execute = vi.fn(async () => 'Tamamlandı')
+    await startListening(execute)
+
+    await sayPartial('Yeni')
+    await flush()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    await flush()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await waitFor(() => expect(unknownToasts()).toHaveLength(1), { timeout: 2500 })
+    expect(execute).not.toHaveBeenCalled()
+
+    await wait(1000)
+    expect(unknownToasts()).toHaveLength(1)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  // Issue case 5
+  it('case 5: runs the sentence when start() resolves nothing', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    const user = userEvent.setup()
+    setup({ execute })
+    speech.start.mockResolvedValue(undefined)
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(SENTENCE)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+    expect(toastMessages().some((message) => message.includes('Cannot read'))).toBe(false)
+  })
+
+  // Issue case 6
+  it('case 6: runs nothing when the screen goes away mid-sentence', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    const user = userEvent.setup()
+    const { view } = setup({ execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(SENTENCE)
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+
+    view.unmount()
+    await wait(1200)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  // Issue case 6, the other half of "the screen is gone"
+  it('case 6b: runs nothing when the screen is hidden mid-sentence', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve')
+    const user = userEvent.setup()
+    const { view } = setup({ execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial('Yeni görev kahve')
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+
+    view.rerender(<VoiceCommand tasks={TASKS} execute={execute} visible={false} />)
+
+    await wait(1200)
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+  })
+
+  // Issue case 8
+  it('case 8: runs the same sentence again in a second turn', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    const user = userEvent.setup()
+    setup({ execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(SENTENCE)
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    // The plugin ended the turn, so the mic is free and opens the next one.
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await waitFor(() => expect(speech.start).toHaveBeenCalledTimes(2))
+    await sayPartial(SENTENCE)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2), { timeout: 2500 })
+    expect(execute).toHaveBeenNthCalledWith(1, { action: 'create', title: 'kahve al' })
+    expect(execute).toHaveBeenNthCalledWith(2, { action: 'create', title: 'kahve al' })
   })
 })
