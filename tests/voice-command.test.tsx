@@ -128,7 +128,11 @@ async function sayPartial(text: string) {
   for (let attempt = 0; attempt < 50 && !speech.listeners.has('partialResults'); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
-  speech.emit('partialResults', { matches: [text] })
+  // Inside act, so the component has the new words before the test starts
+  // waiting: the settle window starts from this moment.
+  await act(async () => {
+    speech.emit('partialResults', { matches: [text] })
+  })
 }
 
 /**
@@ -439,43 +443,48 @@ describe('VoiceCommand settle', () => {
     expect(unknownToasts()).toHaveLength(0)
   })
 
-  // Issue case 2
-  it('case 2: runs on the stopped turn, without waiting out the settle window', async () => {
-    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+  // Issue case 2, revised: on a device `stopped` arrives before the last words.
+  it('case 2: runs only the words that settle after the turn ended', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: deneme görevi')
     await startListening(execute)
 
-    await sayPartial(SENTENCE)
+    await sayPartial('Yeni görev')
     await flush()
     expect(execute).not.toHaveBeenCalled()
 
     await act(async () => {
       speech.emit('listeningState', { status: 'stopped' })
     })
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
 
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 300 })
-    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+    await speakParts(['Yeni görev deneme', 'Yeni görev deneme görevi'], 40)
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'deneme görevi' })
+    expect(unknownToasts()).toHaveLength(0)
   })
 
-  // Issue case 3
-  it('case 3: runs once when the settle window opens after the stopped turn', async () => {
-    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+  // Issue case 3, revised: a turn runs one command, whatever arrives later.
+  it('case 3: ignores a later partial once the turn already ran', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: deneme görevi')
     await startListening(execute)
 
-    await sayPartial(SENTENCE)
-    await flush()
-    expect(execute).not.toHaveBeenCalled()
+    await sayPartial('Yeni görev deneme görevi')
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
 
-    await act(async () => {
-      speech.emit('listeningState', { status: 'stopped' })
-    })
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 300 })
-
-    await wait(1200)
+    // Later in the same turn, after the turn's own settle window has passed.
+    await wait(600)
+    await sayPartial('Yeni görev deneme görevi.')
+    await wait(1000)
     expect(execute).toHaveBeenCalledTimes(1)
   })
 
-  // Issue case 4
-  it('case 4: reports an unknown sentence once, when the turn ends', async () => {
+  // Issue case 4, revised: the unknown sentence waits for the settle window too.
+  it('case 4: reports an unknown sentence once, after the settle window', async () => {
     const execute = vi.fn(async () => 'Tamamlandı')
     await startListening(execute)
 
@@ -486,11 +495,15 @@ describe('VoiceCommand settle', () => {
     await act(async () => {
       speech.emit('listeningState', { status: 'stopped' })
     })
-    await waitFor(() => expect(unknownToasts()).toHaveLength(1), { timeout: 300 })
+    await flush()
+    expect(unknownToasts()).toHaveLength(0)
+
+    await waitFor(() => expect(unknownToasts()).toHaveLength(1), { timeout: 2500 })
     expect(execute).not.toHaveBeenCalled()
 
-    await wait(1200)
+    await wait(1000)
     expect(unknownToasts()).toHaveLength(1)
+    expect(execute).not.toHaveBeenCalled()
   })
 
   // Issue case 5
@@ -542,5 +555,29 @@ describe('VoiceCommand settle', () => {
     await wait(1200)
     expect(execute).not.toHaveBeenCalled()
     expect(unknownToasts()).toHaveLength(0)
+  })
+
+  // Issue case 8
+  it('case 8: runs the same sentence again in a second turn', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    const user = userEvent.setup()
+    setup({ execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(SENTENCE)
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    // The plugin ended the turn, so the mic is free and opens the next one.
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await waitFor(() => expect(speech.start).toHaveBeenCalledTimes(2))
+    await sayPartial(SENTENCE)
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2), { timeout: 2500 })
+    expect(execute).toHaveBeenNthCalledWith(1, { action: 'create', title: 'kahve al' })
+    expect(execute).toHaveBeenNthCalledWith(2, { action: 'create', title: 'kahve al' })
   })
 })
