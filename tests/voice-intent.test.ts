@@ -387,3 +387,69 @@ describe('parseVoiceCommand polite create markers', () => {
     })
   })
 })
+
+describe('parseVoiceCommand spoken times', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 20
+  it('case 20: reads "9.00\'da" as a time and spends it', () => {
+    expect(say("Yarın saat 9.00'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 21
+  it('case 21: reads "9:00\'da" as a time and spends it', () => {
+    expect(say("yarın saat 9:00'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 22
+  it('case 22: reads the hour word "dokuzda" as a time', () => {
+    expect(say('yarın saat dokuzda diş hekimi ekle')).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 23
+  it('case 23: reads a bare "9\'da" as a time', () => {
+    expect(say("yarın 9'da diş hekimi ekle")).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 24
+  it('case 24: reads "21.30 da" with the suffix detached', () => {
+    expect(say('yarın saat 21.30 da toplantı ekle')).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '21:30',
+    })
+  })
+
+  // Issue case 25
+  it('case 25: keeps an hour word that is not a time in the title', () => {
+    expect(say('iki süt al ekle')).toEqual({ action: 'create', title: 'iki süt al' })
+  })
+})
