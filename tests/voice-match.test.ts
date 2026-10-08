@@ -145,3 +145,31 @@ describe('matchTaskTitles', () => {
     expect(ids(matchTaskTitles('Süt', [y, x]))).toEqual(['Y', 'X'])
   })
 })
+
+describe('matchTaskTitles natural Turkish', () => {
+  const A = task('A', 'ses kaydi ekleme')
+
+  // Issue case 14
+  it('case 14: finds a task through a spoken command with dotted and dotless ı', () => {
+    const matches = matchTaskTitles('ses kaydı ekleme notunu siler misin', [A])
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0].task).toBe(A)
+    expect(matches[0].score).toBe(1)
+  })
+
+  // Behaviour rule 4: filler words are stopwords, so they never match a title.
+  it('never matches a filler word as a title word', () => {
+    expect(matchTaskTitles('bir', [task('F', 'Bir')])).toEqual([])
+    expect(matchTaskTitles('lütfen', [task('L', 'Lütfen')])).toEqual([])
+  })
+
+  // Behaviour rule 4: a filler around the words of a title does not break it.
+  it('matches a title that a filler word sits around', () => {
+    const matches = matchTaskTitles('lütfen süt al', [T1])
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0].task).toBe(T1)
+    expect(matches[0].score).toBe(1)
+  })
+})

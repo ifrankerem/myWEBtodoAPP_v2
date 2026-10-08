@@ -247,3 +247,108 @@ describe('parseVoiceCommand unknown', () => {
     expect(parse("Spotify'da Sezen Aksu çal")).toEqual({ action: 'unknown' })
   })
 })
+
+describe('parseVoiceCommand natural Turkish', () => {
+  // Thursday 2026-10-08, midday, built from local parts so no timezone shifts it.
+  const THURSDAY = new Date(2026, 9, 8, 12, 0, 0)
+
+  const A = task('A', 'ses kaydi ekleme', '2026-10-08')
+  const B = task('B', 'kahve al', '2026-10-08')
+  const C = task('C', 'vivado indirbak', '2026-10-08')
+  const D = task('D', 'Süt al', '2026-10-08')
+
+  const ABC = [A, B, C]
+
+  function say(text: string, tasks: Task[] = ABC): VoiceIntent {
+    return parseVoiceCommand(text, tasks, THURSDAY)
+  }
+
+  // Issue case 1
+  it('case 1: deletes the task whose title ends in ekleme', () => {
+    expect(say('ses kaydi ekleme notunu siler misin')).toEqual({ action: 'delete', task: A })
+  })
+
+  // Issue case 2
+  it('case 2: reads the same sentence with a dotted ı in kaydı', () => {
+    expect(say('ses kaydı ekleme notunu siler misin')).toEqual({ action: 'delete', task: A })
+  })
+
+  // Issue case 3
+  it('case 3: reads "silebilir misin" as a delete verb', () => {
+    expect(say('kahve alı silebilir misin')).toEqual({ action: 'delete', task: B })
+  })
+
+  // Issue case 4
+  it('case 4: reads "silermisin" as a delete verb', () => {
+    expect(say('kahve al görevini silermisin')).toEqual({ action: 'delete', task: B })
+  })
+
+  // Issue case 5
+  it('case 5: does not read "silgi" as a delete verb', () => {
+    expect(say('silgi al ekle', [])).toEqual({ action: 'create', title: 'silgi al' })
+  })
+
+  // Issue case 6
+  it('case 6: reads the past tense of the title verb as completing it', () => {
+    expect(say('kahve aldım')).toEqual({ action: 'complete', task: B })
+  })
+
+  // Issue case 7
+  it('case 7: completes on "tamamlandı"', () => {
+    expect(say('kahve al tamamlandı')).toEqual({ action: 'complete', task: B })
+  })
+
+  // Issue case 8
+  it('case 8: completes on "hallettim"', () => {
+    expect(say('vivado indirbak görevini hallettim')).toEqual({ action: 'complete', task: C })
+  })
+
+  // Issue case 9
+  it('case 9: reads a detached "da" as part of the time', () => {
+    expect(say('yarın saat 9 da diş hekimi ekle', [])).toEqual({
+      action: 'create',
+      title: 'diş hekimi',
+      dueDate: '2026-10-09',
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 10
+  it('case 10: creates from "hatırlat"', () => {
+    expect(say('süt almayı hatırlat', [])).toEqual({ action: 'create', title: 'süt al' })
+  })
+
+  // Issue case 11
+  it('case 11: creates from "bana ... diye hatırlat" with a date', () => {
+    expect(say('bana yarın ekmek al diye hatırlat', [])).toEqual({
+      action: 'create',
+      title: 'ekmek al',
+      dueDate: '2026-10-09',
+    })
+  })
+
+  // Issue case 12
+  it('case 12: lists today from "bugün ne var"', () => {
+    expect(say('bugün ne var', [])).toEqual({
+      action: 'list',
+      from: '2026-10-08',
+      to: '2026-10-08',
+    })
+  })
+
+  // Issue case 13
+  it('case 13: ignores the "lütfen" in a delete command', () => {
+    expect(say('lütfen süt al görevini sil', [D])).toEqual({ action: 'delete', task: D })
+  })
+
+  // Issue case 15
+  it('case 15: keeps reading a plain create marker as a create', () => {
+    expect(say('Yeni görev kahve al', [])).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Behaviour rule 1: "silik" and "silah" are not delete verbs.
+  it('does not read silah or silik as a delete verb', () => {
+    expect(say('silah', [task('S1', 'silah', '2026-10-08')])).toEqual({ action: 'unknown' })
+    expect(say('silik', [task('S2', 'silik', '2026-10-08')])).toEqual({ action: 'unknown' })
+  })
+})
