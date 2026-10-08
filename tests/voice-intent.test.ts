@@ -352,3 +352,38 @@ describe('parseVoiceCommand natural Turkish', () => {
     expect(say('silik', [task('S2', 'silik', '2026-10-08')])).toEqual({ action: 'unknown' })
   })
 })
+
+describe('parseVoiceCommand polite create markers', () => {
+  // Thursday 2026-10-08, midday, built from local parts so no timezone shifts it.
+  const THURSDAY = new Date(2026, 9, 8, 12, 0, 0)
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], THURSDAY)
+  }
+
+  // Issue case 16
+  it('case 16: spends "ekler misin" instead of keeping it in the title', () => {
+    expect(say('Yeni görev ekler misin kahve al')).toEqual({
+      action: 'create',
+      title: 'kahve al',
+    })
+  })
+
+  // Issue case 17
+  it('case 17: spends every create marker word in the sentence', () => {
+    expect(say('yeni görev ekle kahve al')).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Issue case 18
+  it('case 18: spends "ekleyebilir misin" wherever it sits', () => {
+    expect(say('kahve al ekleyebilir misin')).toEqual({ action: 'create', title: 'kahve al' })
+  })
+
+  // Issue case 19
+  it('case 19: spends "oluşturur musun" as a create marker', () => {
+    expect(say('yeni görev oluşturur musun süt al')).toEqual({
+      action: 'create',
+      title: 'süt al',
+    })
+  })
+})
