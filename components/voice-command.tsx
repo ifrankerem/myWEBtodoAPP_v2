@@ -5,11 +5,16 @@
 // The speech plugin streams the words it is still hearing, so "Yeni görev
 // kahve" arrives before the user has finished saying "kahve al". Running every
 // partial would create a task per fragment and toast that half a sentence made
-// no sense. The hook keeps the words, this component waits until the sentence
-// settles — either the words stop changing, or the plugin says the turn ended —
-// and only then turns it into an intent with the parser from `lib/voice-intent`
-// and hands it to the page, which owns the task handlers. Nothing here touches
-// storage.
+// no sense. The hook keeps the words, this component holds them still for
+// SETTLE_MS and only then turns the sentence into an intent with the parser
+// from `lib/voice-intent`, handing the intent to the page, which owns the task
+// handlers. Nothing here touches storage.
+//
+// A turn starts with each tap and runs one command. That is not only tidiness:
+// on this device the plugin reports the turn ended before the last words arrive
+// ("stopped" comes from onEndOfSpeech, the rest from onResults), so an ended
+// turn says nothing about whether the sentence is complete — only the silence
+// after the words does.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
@@ -158,7 +163,7 @@ export default function VoiceCommand({
   execute: (intent: VoiceIntent) => Promise<string>
   visible: boolean
 }) {
-  const { supported, listening, transcript, error, settled, start, stop } = useSpeech()
+  const { supported, listening, transcript, error, start, stop } = useSpeech()
   const [pending, setPending] = useState<ConfirmIntent | null>(null)
 
   // The parser needs the task list and the handler as they are when the words
@@ -167,12 +172,17 @@ export default function VoiceCommand({
   tasksRef.current = tasks
   const executeRef = useRef(execute)
   executeRef.current = execute
-  const transcriptRef = useRef(transcript)
-  transcriptRef.current = transcript
 
-  /** The sentence that already ran, so one utterance never runs twice. */
-  const handledRef = useRef("")
+  /** Set once this turn's command ran, so the words that keep arriving are ignored. */
+  const spentRef = useRef(false)
+  /** Set once this turn has words of its own, which tells the plugin's result
+      from a partial it streams after the turn ended. */
+  const heardRef = useRef(false)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Read inside the settle effect, which must not re-run when listening flips.
+  const listeningRef = useRef(listening)
+  listeningRef.current = listening
 
   const clearSettle = useCallback(() => {
     if (settleTimerRef.current === null) return
@@ -182,11 +192,9 @@ export default function VoiceCommand({
 
   const runCommand = useCallback((spoken: string) => {
     const text = spoken.trim()
-    // The plugin delivers the finished sentence twice — once as start()'s
-    // result and once as the last partial — and the settle window can open
-    // after the turn has already ended.
-    if (text === "" || text === handledRef.current) return
-    handledRef.current = text
+    // One turn, one command: the plugin keeps sending words after it ran.
+    if (text === "" || spentRef.current) return
+    spentRef.current = true
 
     const intent = parseVoiceCommand(text, tasksRef.current, new Date())
 
@@ -203,61 +211,65 @@ export default function VoiceCommand({
     void executeRef.current(intent).then((message) => toast.success(message))
   }, [])
 
+  /** Wait for the words to hold still, then run them; restarts on every change. */
+  const armSettle = useCallback(
+    (spoken: string) => {
+      const timer = setTimeout(() => {
+        settleTimerRef.current = null
+        runCommand(spoken)
+      }, SETTLE_MS)
+      settleTimerRef.current = timer
+
+      return () => {
+        clearTimeout(timer)
+        if (settleTimerRef.current === timer) settleTimerRef.current = null
+      }
+    },
+    [runCommand]
+  )
+
   useEffect(() => {
     if (!error) return
     toast.error(error)
   }, [error])
 
-  // The settle window. Words still arriving restart it, so the half-heard
-  // sentences never reach the parser; a plugin that returns the whole utterance
-  // at once has nothing to wait for.
   useEffect(() => {
     const spoken = transcript.trim()
-    // A new utterance starts empty, so the same words may be spoken again.
+
+    // A new turn opens with an empty transcript, so the same words may be spoken
+    // again.
     if (spoken === "") {
-      handledRef.current = ""
+      spentRef.current = false
+      heardRef.current = false
       return
     }
-    if (spoken === handledRef.current) return
-    if (!listening) {
+
+    // The turn's one command has already run.
+    if (spentRef.current) return
+
+    // Anything after the first words of a turn is the plugin still sending the
+    // sentence, even when it has already reported the turn ended. Those wait.
+    if (heardRef.current) return armSettle(spoken)
+    heardRef.current = true
+
+    // A plugin with nothing to stream hands the whole sentence over in start()'s
+    // result instead, and there is nothing left to settle.
+    if (!listeningRef.current) {
       runCommand(spoken)
       return
     }
 
-    const timer = setTimeout(() => {
-      settleTimerRef.current = null
-      runCommand(spoken)
-    }, SETTLE_MS)
-    settleTimerRef.current = timer
-
-    return () => {
-      clearTimeout(timer)
-      if (settleTimerRef.current === timer) settleTimerRef.current = null
-    }
-  }, [transcript, listening, runCommand])
-
-  // A turn the plugin ended on its own runs at once, without waiting the window out.
-  useEffect(() => {
-    if (settled === 0) return
-    const spoken = transcriptRef.current.trim()
-    if (spoken === "") return
-
-    clearSettle()
-    runCommand(spoken)
-  }, [settled, clearSettle, runCommand])
+    return armSettle(spoken)
+  }, [transcript, armSettle, runCommand])
 
   // Walking away from the screen leaves no recognizer running behind it, and
   // nothing half-said may act on tasks the user can no longer see.
-  const listeningRef = useRef(listening)
-  listeningRef.current = listening
-
   useEffect(() => {
     if (visible) return
-    // A sentence the user never finished must not act on tasks they can no
-    // longer see. Drop the words: `stop()` below ends the turn, which is what
-    // lets the last words run, so nothing may be left to run.
+    // Drop the turn: `stop()` below ends listening, and the words must be spent
+    // so that nothing is left for it to run.
     clearSettle()
-    handledRef.current = transcriptRef.current.trim()
+    spentRef.current = true
     if (listeningRef.current) stop()
   }, [visible, stop, clearSettle])
 
