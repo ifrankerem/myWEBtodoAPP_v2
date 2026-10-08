@@ -195,6 +195,9 @@ export default function VoiceCommand({
 
   /** Set once this turn's command ran, so the words that keep arriving are ignored. */
   const spentRef = useRef(false)
+  /** Counts the turns. A worker's answer belongs to the turn whose sentence was
+      spoken, so a turn that opened while the worker thought drops that answer. */
+  const turnRef = useRef(0)
   /** Set once this turn has words of its own, which tells the plugin's result
       from a partial it streams after the turn ended. */
   const heardRef = useRef(false)
@@ -206,6 +209,17 @@ export default function VoiceCommand({
   listeningRef.current = listening
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+
+  // `visibleRef` only tracks the last render, so it still reads true once the
+  // component is gone. This is false from the unmount onwards, and a worker's
+  // answer that arrives after it must act on nothing and say nothing.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const clearSettle = useCallback(() => {
     if (settleTimerRef.current === null) return
@@ -248,19 +262,34 @@ export default function VoiceCommand({
         return
       }
 
+      // Which turn asked: the answer belongs to the sentence that was spoken,
+      // not to whatever the user says next.
+      const turn = turnRef.current
       setThinking(true)
       try {
         const answer = await askRemoteIntent(spoken, tasksRef.current, spokenAt, token, { url })
         // The screen may have gone while the worker was thinking, and an answer
-        // for a screen nobody is looking at must not act on anything.
-        if (!visibleRef.current) return
+        // for a screen nobody is looking at must not act on anything. A newer
+        // turn has the mic now, so that answer belongs to a turn that is over.
+        if (!mountedRef.current || !visibleRef.current || turnRef.current !== turn) return
         applyIntent(answer)
       } finally {
-        if (visibleRef.current) setThinking(false)
+        if (mountedRef.current && visibleRef.current) setThinking(false)
       }
     },
     [applyIntent]
   )
+
+  /**
+   * Open a turn. The mic gives the previous turn up, and its words are cleared so
+   * the same sentence may be spoken again, so anything still waiting for that
+   * turn is now waiting for a turn that is over.
+   */
+  const beginTurn = useCallback(() => {
+    turnRef.current += 1
+    setThinking(false)
+    void start()
+  }, [start])
 
   const runCommand = useCallback(
     (spoken: string) => {
@@ -304,10 +333,12 @@ export default function VoiceCommand({
     const spoken = transcript.trim()
 
     // A new turn opens with an empty transcript, so the same words may be spoken
-    // again.
+    // again. A worker still answering for the words before it is over.
     if (spoken === "") {
       spentRef.current = false
       heardRef.current = false
+      turnRef.current += 1
+      setThinking(false)
       return
     }
 
@@ -336,10 +367,11 @@ export default function VoiceCommand({
   useEffect(() => {
     if (visible) return
     // Drop the turn: `stop()` below ends listening, and the words must be spent
-    // so that nothing is left for it to run. `visibleRef` also tells an answer
+    // so that nothing is left for it to run. Bumping the turn tells an answer
     // that arrives later to go nowhere.
     clearSettle()
     spentRef.current = true
+    turnRef.current += 1
     setThinking(false)
     if (listeningRef.current) stop()
   }, [visible, stop, clearSettle])
@@ -371,7 +403,7 @@ export default function VoiceCommand({
         className="xp-btn"
         aria-label="Sesli komut"
         aria-pressed={listening}
-        onClick={() => (listening ? stop() : void start())}
+        onClick={() => (listening ? stop() : beginTurn())}
         style={{
           position: "fixed",
           right: 18,
