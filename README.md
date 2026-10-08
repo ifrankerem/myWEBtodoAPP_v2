@@ -13,6 +13,7 @@ A **Windows XP-inspired task manager** built as a Progressive Web App (PWA). It 
 - **Photo Attachments** – Attach compressed Base64 images to cloud-synced tasks
 - **Complete & Archive** – Mark tasks complete with visual distinction between active and completed views
 - **Drag & Drop Reordering** – Reorganize tasks with intuitive drag-and-drop powered by `@dnd-kit`
+- **Voice Commands** – Say a command on the My Tasks screen to create, complete, update, delete or list tasks (native build only, mic button bottom-right)
 
 ### Alarm System
 - **Smart Alarms** – Set alarm times for task reminders (24-hour format)
@@ -267,6 +268,33 @@ Data flow: the app writes each task's next fire time to the `alarms`
 collection and its push endpoint to `users/{uid}/pushSubscriptions`; the worker
 queries due alarms once a minute, sends the push, and re-arms repeats in the
 alarm's original timezone.
+
+---
+
+## 🎤 Voice commands
+
+The mic button on **My Tasks** (native builds only) turns one spoken Turkish
+sentence into a task command. Phrasing is decided on device by the rules in
+`lib/voice-intent.ts`: create, complete, update, delete, list. Nothing is sent
+anywhere for those.
+
+When the rules cannot read a sentence — "şu kahve olayını listeden kaldır"
+rather than "kahve al görevini sil" — the app asks the Cloudflare Worker's
+`/voice-intent` endpoint for a second opinion and shows `Düşünüyorum…` while it
+waits. That answer is a suggestion only: a delete or a complete the model
+guessed at comes back as a dialog asking which task was meant, and nothing is
+deleted until you tap it.
+
+Optional setup, after deploying the worker's voice endpoint:
+
+1. Set `NEXT_PUBLIC_VOICE_INTENT_URL` in `.env.local` (and in the Vercel
+   project) to the full URL of the endpoint, e.g.
+   `https://<worker>.workers.dev/voice-intent`.
+2. Rebuild, so the value is baked into the bundle.
+
+Without the variable the app stays on the on-device rules alone and never
+makes the request. With it set, the request is sent as the signed-in Firebase
+user, so an unsigned user keeps the parser-only behaviour.
 
 ---
 
