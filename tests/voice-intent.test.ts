@@ -453,3 +453,39 @@ describe('parseVoiceCommand spoken times', () => {
     expect(say('iki süt al ekle')).toEqual({ action: 'create', title: 'iki süt al' })
   })
 })
+
+describe('parseVoiceCommand part of day before a time', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 26
+  it('case 26: spends "akşam" in front of a clock time', () => {
+    expect(say("Yarın akşam 20.00'de toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '20:00',
+    })
+  })
+
+  // Issue case 27
+  it('case 27: spends "sabah" in front of a clock time', () => {
+    expect(say("yarın sabah 9.00'da koşu ekle")).toEqual({
+      action: 'create',
+      title: 'koşu',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+
+  // Issue case 28
+  it('case 28: keeps a part of day that no time follows', () => {
+    expect(say('akşam yemeği ekle')).toEqual({ action: 'create', title: 'akşam yemeği' })
+  })
+})
