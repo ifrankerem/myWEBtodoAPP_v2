@@ -236,6 +236,39 @@ describe('askRemoteIntent', () => {
       vi.useRealTimers()
     }
   })
+
+  // Issue case 7: a real round trip is token, network and model, so the wait grew.
+  it('case 7: waits ten seconds before it gives up on the worker', async () => {
+    expect(REMOTE_TIMEOUT_MS).toBe(10000)
+
+    vi.useFakeTimers()
+    try {
+      const pending = vi.fn(
+        (_input: unknown, options?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+          })
+      )
+
+      const answer = askRemoteIntent('x', TASKS, TODAY, token, {
+        url: URL,
+        fetchImpl: pending as unknown as typeof fetch,
+      })
+      const settled = vi.fn()
+      answer.then(settled, settled)
+
+      // One tick short of the window the answer is still owed to the user.
+      await vi.advanceTimersByTimeAsync(REMOTE_TIMEOUT_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2)
+
+      await expect(answer).resolves.toEqual({ action: 'unknown' })
+      expect(settled).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('toVoiceIntent', () => {

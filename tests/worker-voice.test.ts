@@ -42,6 +42,71 @@ describe('buildVoicePrompt', () => {
     expect(prompt).toContain('B: kahve al')
     expect(prompt).toContain('2026-10-09')
   })
+
+  // Issue case 6: the rule is pinned to the wording the issue names — the
+  // prompt has to say `id` and "başlık değil" for taskId and candidates alike.
+  // The sentences carrying it are collected first, so the worker is free to
+  // split the rule over a line or two.
+  it('case 6: tells the model to answer with the id and never the title', () => {
+    const prompt = buildVoicePrompt(request())
+
+    const rule = prompt
+      .split('\n')
+      .filter((line) => line.includes('başlık değil'))
+      .join(' ')
+
+    expect(rule, 'prompt never says the title is not what it wants').not.toBe('')
+    expect(rule).toMatch(/\bid\b/i)
+    expect(rule).toMatch(/taskId/i)
+    expect(rule).toMatch(/candidates/i)
+  })
+})
+
+describe('normalizeRemoteIntent: a title where an id was expected', () => {
+  const A = { id: 'A', title: 'ses kaydi ekleme' }
+  const B = { id: 'B', title: 'kahve al' }
+  const C = { id: 'C', title: 'ekler kahve al' }
+  const D = { id: 'D', title: 'Kahve Al' }
+
+  const with_ = (...tasks: VoiceRequest['tasks']): Partial<VoiceRequest> => ({ tasks })
+
+  // Issue case 1
+  it('case 1: reads a taskId that names the task by its title', () => {
+    expect(
+      normalizeRemoteIntent({ action: 'delete', taskId: 'kahve al' }, request(with_(A, B, C)))
+    ).toEqual({ action: 'delete', taskId: 'B' })
+  })
+
+  // Issue case 2
+  it('case 2: compares a title trimmed and in Turkish lower case', () => {
+    expect(
+      normalizeRemoteIntent({ action: 'delete', taskId: '  KAHVE AL ' }, request(with_(A, B, C)))
+    ).toEqual({ action: 'delete', taskId: 'B' })
+  })
+
+  // Issue case 3
+  it('case 3: drops a title that two tasks share', () => {
+    expect(
+      normalizeRemoteIntent({ action: 'delete', taskId: 'kahve al' }, request(with_(A, B, C, D)))
+    ).toEqual({ action: 'unknown' })
+  })
+
+  // Issue case 4
+  it('case 4: reads every candidate that named a task by its title', () => {
+    expect(
+      normalizeRemoteIntent(
+        { action: 'delete', candidates: ['kahve al', 'ekler kahve al'] },
+        request(with_(A, B, C))
+      )
+    ).toEqual({ action: 'confirm', wanted: 'delete', candidates: ['B', 'C'] })
+  })
+
+  // Issue case 5
+  it('case 5: does not match a title only half said', () => {
+    expect(
+      normalizeRemoteIntent({ action: 'delete', taskId: 'kahve' }, request(with_(A, B, C)))
+    ).toEqual({ action: 'unknown' })
+  })
 })
 
 describe('resolveVoiceIntent', () => {
