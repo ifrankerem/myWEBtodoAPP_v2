@@ -73,6 +73,39 @@ const toast = vi.hoisted(() =>
 
 vi.mock('sonner', () => ({ Toaster: () => null, toast }))
 
+/* The worker call: a spy whose answer each test sets, and a pending promise it
+   can hold open to inspect the balloon while it waits. */
+const remote = vi.hoisted(() => ({
+  askRemoteIntent: vi.fn(),
+  defaultGetToken: async () => 'tok',
+  hold: false,
+  release: null as null | (() => void),
+}))
+
+vi.mock('@/lib/voice-remote', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/voice-remote')>()
+  return {
+    ...actual,
+    voiceIntentUrl: () => process.env.NEXT_PUBLIC_VOICE_INTENT_URL ?? null,
+    askRemoteIntent: remote.askRemoteIntent,
+  }
+})
+
+/** Make the remote answer `intent` once it is called. */
+function remoteAnswers(intent: VoiceIntent) {
+  remote.askRemoteIntent.mockResolvedValue(intent)
+}
+
+/** Make the remote stay unanswered until `release()` is called with `intent`. */
+function remoteHolds(intent: VoiceIntent) {
+  remote.askRemoteIntent.mockImplementation(
+    () =>
+      new Promise<VoiceIntent>((resolve) => {
+        remote.release = () => resolve(intent)
+      })
+  )
+}
+
 /* ------------------------------------------------------------------ *
  * Fixtures
  * ------------------------------------------------------------------ */
@@ -101,10 +134,23 @@ const TASKS = [T1, T2, T7, T8, T9, T10]
 
 const MIC = 'Sesli komut'
 
-function setup(overrides: { visible?: boolean; execute?: (intent: VoiceIntent) => Promise<string> } = {}) {
+function setup(
+  overrides: {
+    visible?: boolean
+    tasks?: Task[]
+    execute?: (intent: VoiceIntent) => Promise<string>
+    getToken?: (() => Promise<string | null>) | null
+  } = {}
+) {
   const execute = overrides.execute ?? vi.fn(async () => 'Tamamlandı')
+  const getToken = overrides.getToken === undefined ? remote.defaultGetToken : overrides.getToken
   const view = render(
-    <VoiceCommand tasks={TASKS} execute={execute} visible={overrides.visible ?? true} />
+    <VoiceCommand
+      tasks={overrides.tasks ?? TASKS}
+      execute={execute}
+      visible={overrides.visible ?? true}
+      {...(getToken === null ? {} : { getToken })}
+    />
   )
   return { execute, view }
 }
@@ -196,6 +242,11 @@ async function speakParts(texts: string[], gapMs = 60) {
 
 beforeEach(() => {
   platform.native = true
+  remote.release = null
+  remote.defaultGetToken = async () => 'tok'
+  remote.askRemoteIntent.mockReset()
+  remoteAnswers({ action: 'unknown' })
+  vi.stubEnv('NEXT_PUBLIC_VOICE_INTENT_URL', 'https://w.example/voice-intent')
   speech.reset()
   speech.available.mockReset().mockResolvedValue({ available: true })
   speech.checkPermissions.mockReset().mockResolvedValue({ speechRecognition: 'granted' })
@@ -581,3 +632,147 @@ describe('VoiceCommand settle', () => {
     expect(execute).toHaveBeenNthCalledWith(2, { action: 'create', title: 'kahve al' })
   })
 })
+
+/** Speak one sentence and let the recognizer end the turn, so the short window applies. */
+async function speak(
+  text: string,
+  overrides: Parameters<typeof setup>[0] = {}
+) {
+  const result = setup(overrides)
+  const user = userEvent.setup()
+  keepListening()
+
+  await user.click(await screen.findByRole('button', { name: MIC }))
+  await sayPartial(text)
+  await flush()
+  await act(async () => {
+    speech.emit('listeningState', { status: 'stopped' })
+  })
+
+  return { ...result, user }
+}
+
+describe('VoiceCommand remote fallback', () => {
+  const KAHVE = task('B', 'kahve al', '2026-10-05')
+
+  const UNREADABLE = 'şu kahve olayını listeden kaldır'
+
+  // Issue case 9
+  it('case 9: asks which task the worker meant before it deletes', async () => {
+    const execute = vi.fn(async () => 'Silindi: kahve al')
+    remoteAnswers({ action: 'confirm', candidates: [KAHVE], wanted: 'delete' })
+    const { user } = await speak(UNREADABLE, { tasks: [KAHVE], execute })
+
+    const dialog = await screen.findByRole('dialog', { name: 'Sesli Komut' }, { timeout: 2500 })
+    expect(within(dialog).getByRole('button', { name: /kahve al/i })).toBeInTheDocument()
+    expect(execute).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: /kahve al/i }))
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+    expect(execute).toHaveBeenCalledWith({ action: 'delete', task: KAHVE })
+  })
+
+  // Issue case 10
+  it('case 10: says it is thinking while the worker is still answering', async () => {
+    remoteHolds({ action: 'unknown' })
+    await speak(UNREADABLE, { tasks: [KAHVE] })
+
+    expect(await screen.findByText(/düşünüyorum/i, undefined, { timeout: 2500 })).toBeInTheDocument()
+    expect(remote.askRemoteIntent).toHaveBeenCalledTimes(1)
+  })
+
+  // Issue case 11
+  it('case 11: reports an unknown sentence once when the worker gives up too', async () => {
+    const execute = vi.fn(async () => 'Tamamlandı')
+    remoteAnswers({ action: 'unknown' })
+    await speak(UNREADABLE, { tasks: [KAHVE], execute })
+
+    await waitFor(() => expect(unknownToasts()).toHaveLength(1), { timeout: 2500 })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  // Issue case 12
+  it('case 12: never asks the worker about a sentence the parser reads', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    await speak('Yeni görev kahve al', { tasks: [KAHVE], execute })
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+    expect(remote.askRemoteIntent).not.toHaveBeenCalled()
+  })
+
+  // Issue case 13
+  it('case 13: stays on the parser alone without a token or without a url', async () => {
+    await speak(UNREADABLE, { tasks: [KAHVE], getToken: null })
+    await waitFor(() => expect(unknownToasts()).toHaveLength(1), { timeout: 2500 })
+    expect(remote.askRemoteIntent).not.toHaveBeenCalled()
+
+    remote.askRemoteIntent.mockClear()
+    vi.stubEnv('NEXT_PUBLIC_VOICE_INTENT_URL', '')
+    await speak(UNREADABLE, { tasks: [KAHVE] })
+    await waitFor(() => expect(unknownToasts()).toHaveLength(2), { timeout: 2500 })
+    expect(remote.askRemoteIntent).not.toHaveBeenCalled()
+  })
+
+  // Issue case 14
+  it('case 14: throws the answer away when the screen is hidden while it waits', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: ekmek al')
+    remoteHolds({ action: 'create', title: 'ekmek al' })
+
+    const { view } = setup({ tasks: [KAHVE], execute })
+    const user = userEvent.setup()
+    keepListening()
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(UNREADABLE)
+    await flush()
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+
+    await waitFor(() => expect(remote.askRemoteIntent).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    view.rerender(<VoiceCommand tasks={[KAHVE]} execute={execute} visible={false} getToken={remote.defaultGetToken} />)
+    remote.release?.()
+
+    await wait(1200)
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+  })
+})
+
+describe('VoiceCommand settle window', () => {
+  // Issue case 15
+  it('case 15: waits out a pause mid-sentence while still listening', async () => {
+    const PDF = task('PDF', 'PDF biriktirme', '2026-10-05')
+    const execute = vi.fn(async () => 'Silindi: PDF biriktirme')
+    const user = userEvent.setup()
+    setup({ tasks: [PDF], execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial('PDF')
+    await flush()
+    await wait(1200)
+    expect(execute).not.toHaveBeenCalled()
+
+    await sayPartial('PDF biriktirme notunu sil')
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    expect(execute).toHaveBeenCalledWith({ action: 'delete', task: PDF })
+    expect(unknownToasts()).toHaveLength(0)
+  }, 3000)
+
+  // Issue case 16
+  it('case 16: runs on the shorter window once the turn has ended', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    await speak('Yeni görev kahve al', { execute })
+
+    await wait(600)
+    expect(execute).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 500 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+  }, 3000)
+})
+
