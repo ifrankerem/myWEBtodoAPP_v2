@@ -7,6 +7,9 @@
 import { FirestoreClient, documentId, readFields } from './firestore'
 import { getNextRepeatFireAt } from './schedule'
 import { sendWebPush, type PushSubscriptionKeys, type VapidKeys } from './webpush'
+import { verifyFirebaseIdToken } from './auth'
+import { isVoiceRequest, resolveVoiceIntent, type VoiceRequest } from './voice'
+import type { Ai } from '@cloudflare/workers-types'
 
 export interface Env {
   FIREBASE_SERVICE_ACCOUNT: string
@@ -16,6 +19,83 @@ export interface Env {
   VAPID_SUBJECT: string
   APP_URL?: string
   TRIGGER_SECRET?: string
+  /** Workers AI, used by /voice-intent. */
+  AI: Ai
+}
+
+/**
+ * Origins the browser and the Android shell may call from: Capacitor serves the
+ * app over `https://localhost` on Android and `capacitor://localhost` on iOS,
+ * and `http://localhost:3000` is the dev server.
+ */
+const FIXED_ORIGINS = ['https://localhost', 'capacitor://localhost', 'http://localhost:3000']
+
+/** Whether this origin may call the voice endpoint at all. */
+function corsHeaders(origin: string | null, env: Env): Record<string, string> {
+  const allowed = new Set(FIXED_ORIGINS)
+  if (env.APP_URL) {
+    try {
+      allowed.add(new URL(env.APP_URL).origin)
+    } catch {
+      // A malformed APP_URL only costs the web origin, nothing else.
+    }
+  }
+
+  if (origin === null || !allowed.has(origin)) return {}
+
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Headers': 'authorization, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    Vary: 'Origin',
+  }
+}
+
+/** The project the ID tokens must be signed for. */
+function projectIdOf(env: Env): string {
+  if (env.FIREBASE_PROJECT_ID) return env.FIREBASE_PROJECT_ID
+  return (JSON.parse(env.FIREBASE_SERVICE_ACCOUNT).project_id as string) ?? ''
+}
+
+/** A response carrying the CORS headers, if the origin is one we answer. */
+function jsonWithCors(body: unknown, status: number, origin: string | null, env: Env): Response {
+  return Response.json(body, { status, headers: corsHeaders(origin, env) })
+}
+
+/**
+ * The rule parser in the app handles most sentences; this asks Workers AI for
+ * the ones it could not read. It costs a model call per request, so it is closed
+ * to callers who cannot present an ID token this project signed.
+ */
+async function handleVoiceIntent(request: Request, env: Env, origin: string | null) {
+  const authorization = request.headers.get('authorization')
+  if (!authorization?.startsWith('Bearer ')) {
+    return jsonWithCors({ error: 'unauthorized' }, 401, origin, env)
+  }
+
+  try {
+    await verifyFirebaseIdToken(authorization.slice('Bearer '.length), projectIdOf(env))
+  } catch (error) {
+    console.warn('voice-intent auth failed', (error as Error).message)
+    return jsonWithCors({ error: 'unauthorized' }, 401, origin, env)
+  }
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return jsonWithCors({ error: 'bad request' }, 400, origin, env)
+  }
+  if (!isVoiceRequest(body)) {
+    return jsonWithCors({ error: 'bad request' }, 400, origin, env)
+  }
+
+  try {
+    return jsonWithCors(await resolveVoiceIntent(env.AI, body as VoiceRequest), 200, origin, env)
+  } catch (error) {
+    console.error('voice-intent model failed', (error as Error).message)
+    return jsonWithCors({ error: 'model failed' }, 502, origin, env)
+  }
 }
 
 /** Cap per run so one bad batch cannot blow the worker's CPU budget. */
@@ -237,9 +317,20 @@ export default {
 
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const origin = request.headers.get('origin')
 
     if (url.pathname === '/health') {
       return Response.json({ ok: true, time: new Date().toISOString() })
+    }
+
+    if (url.pathname === '/voice-intent') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: corsHeaders(origin, env) })
+      }
+      if (request.method !== 'POST') {
+        return jsonWithCors({ error: 'bad request' }, 405, origin, env)
+      }
+      return handleVoiceIntent(request, env, origin)
     }
 
     // Manual trigger for testing. Disabled unless TRIGGER_SECRET is configured.

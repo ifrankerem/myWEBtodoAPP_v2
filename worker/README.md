@@ -82,6 +82,49 @@ npm run deploy
 npm run tail          # live logs
 ```
 
+## `POST /voice-intent`
+
+The app parses a spoken Turkish sentence with rules (`lib/voice-intent.ts`). When
+a sentence says something the rules cannot read, the app asks this endpoint to
+read it with Workers AI instead. It returns the intent and nothing else — every
+task write still happens in the app.
+
+```bash
+curl -X POST https://<worker>.workers.dev/voice-intent \
+  -H "Authorization: Bearer <Firebase ID token>" \
+  -H "content-type: application/json" \
+  -d '{"text":"Yarın akşam 8 toplantı ekle","tasks":[{"id":"B","title":"kahve al"}],"today":"2026-10-09"}'
+```
+
+The body is `{ text, tasks: [{ id, title }], today }` — `text` up to 300
+characters, up to 300 tasks, `today` as `YYYY-MM-DD`. The answer is the intent:
+
+```json
+{ "action": "create", "title": "toplantı", "dueDate": "2026-10-10", "alarm": "20:00" }
+```
+
+Actions are `create`, `delete`, `complete`, `update`, `list`, `confirm` and
+`unknown`. A model answer that names a task id the request did not send, a date
+that is not a date or a clock time that is not one is dropped rather than
+passed on, so a wrong answer becomes `unknown` instead of a wrong write.
+
+Errors are `401 {"error":"unauthorized"}` (no or invalid Firebase ID token),
+`400 {"error":"bad request"}` (broken body) and `502 {"error":"model failed"}`
+(the model threw or answered with something that is not JSON).
+
+Unlike the alarm endpoints this one is closed: every call costs a model call, so
+it answers only to a token this project signed. The signing keys are read from
+Google's public JWKS and cached for as long as that response says they are fresh.
+
+CORS allows the Capacitor origins (`https://localhost`, `capacitor://localhost`),
+`http://localhost:3000` and the origin of `APP_URL`; anything else gets no CORS
+headers.
+
+The `ai` binding in `wrangler.jsonc` is what makes this endpoint work. Adding it
+requires a redeploy — `npm run deploy` after pulling, not just a secret change.
+Workers AI needs a paid plan or the free AI allocation; without the binding the
+endpoint answers `502`.
+
 ## Local development
 
 ```bash
@@ -110,4 +153,8 @@ skipped as too late, and how many dead subscriptions were pruned.
 - **Re-arming happens even if delivery failed**, so a bad endpoint cannot make
   the same alarm fire on every subsequent run.
 - **Free tier.** 100k worker requests/day and cron triggers are included; this
-  workload is far under that.
+  workload is far under that. Workers AI has its own free allocation, which
+  `/voice-intent` spends.
+- **The model never writes.** `/voice-intent` answers with an intent and stops;
+  the app applies it. A bad answer can therefore only produce a wrong
+  suggestion the user sees, never a wrong task.
