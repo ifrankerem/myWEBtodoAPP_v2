@@ -524,4 +524,23 @@ describe('VoiceCommand settle', () => {
     await wait(1200)
     expect(execute).not.toHaveBeenCalled()
   })
+
+  // Issue case 6, the other half of "the screen is gone"
+  it('case 6b: runs nothing when the screen is hidden mid-sentence', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve')
+    const user = userEvent.setup()
+    const { view } = setup({ execute })
+    keepListening()
+
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial('Yeni görev kahve')
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+
+    view.rerender(<VoiceCommand tasks={TASKS} execute={execute} visible={false} />)
+
+    await wait(1200)
+    expect(execute).not.toHaveBeenCalled()
+    expect(unknownToasts()).toHaveLength(0)
+  })
 })
