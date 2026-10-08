@@ -16,9 +16,11 @@ import type { VoiceIntent } from '@/lib/voice-intent'
 
 /**
  * Long enough for the model to answer, short enough that a worker which never
- * replies does not leave the user looking at "Düşünüyorum…" for a minute.
+ * replies does not leave the user looking at "Düşünüyorum…" forever. A real round
+ * trip is the token, the network and the model: ~3.2 s on the model alone with a
+ * long task list, and the 6 s this used to wait for cut it off mid-answer.
  */
-export const REMOTE_TIMEOUT_MS = 6000
+export const REMOTE_TIMEOUT_MS = 10000
 
 /** Where the Worker's voice endpoint lives, or null when it is not configured. */
 export function voiceIntentUrl(): string | null {

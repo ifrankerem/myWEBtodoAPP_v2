@@ -130,6 +130,7 @@ export function buildVoicePrompt(request: VoiceRequest): string {
     '- `ne var`, `hangi görevlerim`, `listele`, `göster` → list.',
     '- Konuşma tanıma bazı kelimeleri yanlış duyabilir: `göre beni` = `görevi`, `yap` = `yap`.',
     '- Birden çok görev eşleşirse candidates yaz.',
+    '- `taskId` ve `candidates` için görev başlık değil, listedeki `id` yazılır (örneğin `t17`).',
     '- Emin değilsen unknown yaz.',
     '- Yalnızca JSON döndür.',
     '',
@@ -142,17 +143,34 @@ export function buildVoicePrompt(request: VoiceRequest): string {
  * The answer, with nothing in it the request did not put there. Anything the
  * model made up — an id that was never sent, a date that is not a date, a field
  * for an action that does not take it — is dropped rather than passed on.
+ *
+ * The model names a task by its title as often as by its id ("kahve al" instead
+ * of "t17"), so a name that is not an id is read as a title. The match is the
+ * whole title, trimmed and lower-cased in Turkish; a title no task has, or that
+ * two tasks share, names nothing and is dropped as before.
  */
 export function normalizeRemoteIntent(raw: unknown, request: VoiceRequest): RemoteIntent {
   if (!isRecord(raw)) return { action: 'unknown' }
 
   const action = raw.action
   const known = request.tasks.map((task) => task.id)
-  const isKnownId = (value: unknown): value is string =>
-    typeof value === 'string' && known.includes(value)
+  /** The task a name points at, whether the model wrote the id or the title. */
+  const resolveTaskId = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined
+    if (known.includes(value)) return value
+
+    const wanted = value.trim().toLocaleLowerCase('tr-TR')
+    const titled = request.tasks.filter(
+      (task) => task.title.trim().toLocaleLowerCase('tr-TR') === wanted
+    )
+    // Two tasks with the title name no single one of them.
+    return titled.length === 1 ? titled[0].id : undefined
+  }
 
   const candidates = Array.isArray(raw.candidates)
-    ? raw.candidates.filter(isKnownId)
+    ? raw.candidates
+        .map(resolveTaskId)
+        .filter((id): id is string => id !== undefined)
     : []
   const wanted = (raw.action === 'delete' || raw.action === 'complete' || raw.action === 'update'
     ? raw.action
@@ -180,11 +198,12 @@ export function normalizeRemoteIntent(raw: unknown, request: VoiceRequest): Remo
   }
 
   if (action === 'delete' || action === 'complete' || action === 'update') {
-    if (isKnownId(raw.taskId)) {
+    const taskId = resolveTaskId(raw.taskId)
+    if (taskId !== undefined) {
       if (action === 'update') {
         const intent: { action: 'update'; taskId: string; title?: string; dueDate?: string; alarm?: string } = {
           action: 'update',
-          taskId: raw.taskId,
+          taskId,
         }
         const title = trimmedString(raw.title)
         const dueDate = validDate(raw.dueDate)
@@ -198,7 +217,7 @@ export function normalizeRemoteIntent(raw: unknown, request: VoiceRequest): Remo
         }
         return intent
       }
-      return { action, taskId: raw.taskId }
+      return { action, taskId }
     }
 
     // No id, but the model narrowed it to one task: that is the same answer.
