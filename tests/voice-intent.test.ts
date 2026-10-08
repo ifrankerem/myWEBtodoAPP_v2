@@ -489,3 +489,54 @@ describe('parseVoiceCommand part of day before a time', () => {
     expect(say('akşam yemeği ekle')).toEqual({ action: 'create', title: 'akşam yemeği' })
   })
 })
+
+describe('parseVoiceCommand 12-hour clock after a part of day', () => {
+  // Friday 2026-10-09, midday, so tomorrow is 2026-10-10.
+  const FRIDAY = new Date(2026, 9, 9, 12, 0, 0)
+
+  const TOMORROW = '2026-10-10'
+
+  function say(text: string): VoiceIntent {
+    return parseVoiceCommand(text, [], FRIDAY)
+  }
+
+  // Issue case 29
+  it('case 29: reads "akşam 8.00\'de" as twenty o\'clock', () => {
+    expect(say("Yarın akşam 8.00'de toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '20:00',
+    })
+  })
+
+  // Issue case 30
+  it('case 30: reads "öğleden sonra 3.00\'te" as fifteen o\'clock', () => {
+    expect(say("yarın öğleden sonra 3.00'te toplantı ekle")).toEqual({
+      action: 'create',
+      title: 'toplantı',
+      dueDate: TOMORROW,
+      alarm: '15:00',
+    })
+  })
+
+  // Issue case 31
+  it('case 31: shifts "gece 11.30" and keeps the minutes', () => {
+    expect(say("yarın gece 11.30'da ilaç ekle")).toEqual({
+      action: 'create',
+      title: 'ilaç',
+      dueDate: TOMORROW,
+      alarm: '23:30',
+    })
+  })
+
+  // Issue case 32
+  it('case 32: still reads "sabah 9.00\'da" as nine o\'clock', () => {
+    expect(say("yarın sabah 9.00'da koşu ekle")).toEqual({
+      action: 'create',
+      title: 'koşu',
+      dueDate: TOMORROW,
+      alarm: '09:00',
+    })
+  })
+})
