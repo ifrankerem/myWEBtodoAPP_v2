@@ -392,11 +392,17 @@ function isDateWord(key: string | undefined): boolean {
   return matchesWord(key, 'bugün') || matchesWord(key, 'yarın') || weekdayOf(key) !== undefined
 }
 
-/** What part of the day a word names, or undefined when it names none. */
-function partOfDayAt(key: string | undefined): number | undefined {
-  if (key === undefined) return undefined
+/**
+ * What part of the day a word names, and how many words it took to say it, or
+ * undefined when it names none. "öğleden sonra" is two words.
+ */
+function partOfDayAt(keys: string[], index: number): { shift: number; length: number } | undefined {
+  if (matchesWord(keys[index], 'öğleden') && matchesWord(keys[index + 1], 'sonra')) {
+    return { shift: PART_OF_DAY.akşam, length: 2 }
+  }
+
   for (const [word, shift] of Object.entries(PART_OF_DAY)) {
-    if (matchesWord(key, word)) return shift
+    if (matchesWord(keys[index], word)) return { shift, length: 1 }
   }
   return undefined
 }
@@ -473,16 +479,23 @@ function timeAt(keys: string[], index: number): TimeSpan | null {
     return null
   }
 
+  // A part of the day belongs to the time after it: "akşam 20.00" is twenty
+  // o'clock, and the word is spent with the clock rather than left in the title.
+  // With a clock time the clock decides, since it already says which hour.
+  const part = partOfDayAt(keys, index)
+  if (part !== undefined) {
+    const after = index + part.length
+    const clock = clockAt(keys[after])
+    if (clock) return { start: index, length: part.length + 1, time: clock }
+
+    const hour = spokenHourAt(keys, after)
+    if (hour === null) return null
+    const spoken = part.shift === 12 && hour.hour < 12 ? hour.hour + 12 : hour.hour
+    return { start: index, length: part.length + hour.length, time: `${pad(spoken)}:00` }
+  }
+
   const clock = clockAt(key)
   if (clock) return { start: index, length: 1, time: clock }
-
-  const part = partOfDayAt(key)
-  if (part !== undefined) {
-    const hour = spokenHourAt(keys, index + 1)
-    if (hour === null) return null
-    const spoken = part === 12 && hour.hour < 12 ? hour.hour + 12 : hour.hour
-    return { start: index, length: 1 + hour.length, time: `${pad(spoken)}:00` }
-  }
 
   return null
 }
