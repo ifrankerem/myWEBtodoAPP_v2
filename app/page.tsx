@@ -792,8 +792,15 @@ export default function Page() {
 
         {savingTitle !== null && <XpCopyDialog title={savingTitle} />}
 
-        {/* Voice commands answer in a toast; the mic only lives on My Tasks. */}
-        <VoiceCommand tasks={tasks} execute={executeVoiceIntent} visible={currentScreen === "tasks"} />
+        {/* Voice commands answer in a toast; the mic only lives on My Tasks.
+            The worker that reads a sentence the rules cannot is asked with the
+            signed-in user's token, so only a signed-in user gets a suggestion. */}
+        <VoiceCommand
+          tasks={tasks}
+          execute={executeVoiceIntent}
+          visible={currentScreen === "tasks"}
+          getToken={async () => (user ? user.getIdToken() : null)}
+        />
 
         <Toaster position="top-center" richColors closeButton />
 

@@ -5,16 +5,21 @@
 // The speech plugin streams the words it is still hearing, so "Yeni görev
 // kahve" arrives before the user has finished saying "kahve al". Running every
 // partial would create a task per fragment and toast that half a sentence made
-// no sense. The hook keeps the words, this component holds them still for
-// SETTLE_MS and only then turns the sentence into an intent with the parser
-// from `lib/voice-intent`, handing the intent to the page, which owns the task
+// no sense. The hook keeps the words, this component holds them still and only
+// then turns the sentence into an intent with the parser from
+// `lib/voice-intent`, handing the intent to the page, which owns the task
 // handlers. Nothing here touches storage.
 //
 // A turn starts with each tap and runs one command. That is not only tidiness:
 // on this device the plugin reports the turn ended before the last words arrive
 // ("stopped" comes from onEndOfSpeech, the rest from onResults), so an ended
 // turn says nothing about whether the sentence is complete — only the silence
-// after the words does.
+// after the words does. That silence is longer while the user is still speaking
+// than after they stop, which is why there are two windows.
+//
+// When the rules cannot read a sentence, the Worker's model is asked instead
+// (see `lib/voice-remote.ts`). Its answer is a suggestion: a delete it guessed
+// at comes back as a confirmation to tap, never as a delete.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
@@ -23,6 +28,7 @@ import { Mic } from "lucide-react"
 import { toast } from "sonner"
 import { XpDialog, XpMessage } from "@/components/xp-ui"
 import { parseVoiceCommand, type VoiceIntent } from "@/lib/voice-intent"
+import { askRemoteIntent, voiceIntentUrl } from "@/lib/voice-remote"
 import type { Task } from "@/lib/task"
 
 /** The plugin registers itself under this name. */
@@ -31,11 +37,19 @@ const PLUGIN = "SpeechRecognition"
 /** Turkish is the language the parser reads. */
 const LANGUAGE = "tr-TR"
 
-/** How long the transcript must hold still before it counts as the whole command. */
-const SETTLE_MS = 900
+/**
+ * How long the words must hold still before they count as the whole command.
+ * While the recognizer is still running a pause is part of speaking — on device
+ * a 1.4 s pause after "PDF" used to cut the sentence in half — so it waits
+ * longer. Once the turn has ended the words are all that are coming, so it does
+ * not.
+ */
+const SETTLE_LISTENING_MS = 1500
+const SETTLE_ENDED_MS = 700
 
 const UNKNOWN = "Sesli komut anlaşılmadı"
 const AMBIGUOUS_UPDATE = "Hangi görev olduğunu belirt"
+const THINKING = "Düşünüyorum…"
 
 function errorText(error: unknown): string {
   if (error instanceof Error && error.message !== "") return error.message
@@ -158,13 +172,17 @@ export default function VoiceCommand({
   tasks,
   execute,
   visible,
+  getToken,
 }: {
   tasks: Task[]
   execute: (intent: VoiceIntent) => Promise<string>
   visible: boolean
+  /** The caller's Firebase token, or null when nobody is signed in. */
+  getToken?: () => Promise<string | null>
 }) {
   const { supported, listening, transcript, error, start, stop } = useSpeech()
   const [pending, setPending] = useState<ConfirmIntent | null>(null)
+  const [thinking, setThinking] = useState(false)
 
   // The parser needs the task list and the handler as they are when the words
   // were spoken, so neither a settling timer nor a later task list re-runs them.
@@ -172,6 +190,8 @@ export default function VoiceCommand({
   tasksRef.current = tasks
   const executeRef = useRef(execute)
   executeRef.current = execute
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
 
   /** Set once this turn's command ran, so the words that keep arriving are ignored. */
   const spentRef = useRef(false)
@@ -180,9 +200,12 @@ export default function VoiceCommand({
   const heardRef = useRef(false)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Read inside the settle effect, which must not re-run when listening flips.
+  // Read inside the settle effect and by the remote call, which must not be
+  // restarted by a re-render.
   const listeningRef = useRef(listening)
   listeningRef.current = listening
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
 
   const clearSettle = useCallback(() => {
     if (settleTimerRef.current === null) return
@@ -190,14 +213,7 @@ export default function VoiceCommand({
     settleTimerRef.current = null
   }, [])
 
-  const runCommand = useCallback((spoken: string) => {
-    const text = spoken.trim()
-    // One turn, one command: the plugin keeps sending words after it ran.
-    if (text === "" || spentRef.current) return
-    spentRef.current = true
-
-    const intent = parseVoiceCommand(text, tasksRef.current, new Date())
-
+  const applyIntent = useCallback((intent: VoiceIntent) => {
     if (intent.action === "unknown") {
       toast.error(UNKNOWN)
       return
@@ -211,13 +227,64 @@ export default function VoiceCommand({
     void executeRef.current(intent).then((message) => toast.success(message))
   }, [])
 
+  /**
+   * What the sentence meant: the rules first, and the Worker only for a sentence
+   * they could not read.
+   */
+  const handleSpoken = useCallback(
+    async (spoken: string) => {
+      const spokenAt = new Date()
+      const intent = parseVoiceCommand(spoken, tasksRef.current, spokenAt)
+      if (intent.action !== "unknown") {
+        applyIntent(intent)
+        return
+      }
+
+      const url = voiceIntentUrl()
+      const token = getTokenRef.current
+      // No endpoint or nobody signed in: the rules are all there is.
+      if (!url || !token) {
+        applyIntent(intent)
+        return
+      }
+
+      setThinking(true)
+      try {
+        const answer = await askRemoteIntent(spoken, tasksRef.current, spokenAt, token, { url })
+        // The screen may have gone while the worker was thinking, and an answer
+        // for a screen nobody is looking at must not act on anything.
+        if (!visibleRef.current) return
+        applyIntent(answer)
+      } finally {
+        if (visibleRef.current) setThinking(false)
+      }
+    },
+    [applyIntent]
+  )
+
+  const runCommand = useCallback(
+    (spoken: string) => {
+      const text = spoken.trim()
+      // One turn, one command: the plugin keeps sending words after it ran, and
+      // the worker's answer is that turn's command too.
+      if (text === "" || spentRef.current) return
+      spentRef.current = true
+
+      void handleSpoken(text)
+    },
+    [handleSpoken]
+  )
+
   /** Wait for the words to hold still, then run them; restarts on every change. */
   const armSettle = useCallback(
     (spoken: string) => {
-      const timer = setTimeout(() => {
-        settleTimerRef.current = null
-        runCommand(spoken)
-      }, SETTLE_MS)
+      const timer = setTimeout(
+        () => {
+          settleTimerRef.current = null
+          runCommand(spoken)
+        },
+        listeningRef.current ? SETTLE_LISTENING_MS : SETTLE_ENDED_MS
+      )
       settleTimerRef.current = timer
 
       return () => {
@@ -260,16 +327,20 @@ export default function VoiceCommand({
     }
 
     return armSettle(spoken)
-  }, [transcript, armSettle, runCommand])
+    // `listening` is a dependency because the window is shorter once the turn has
+    // ended: the same words should not wait for a pause that cannot come.
+  }, [transcript, listening, armSettle, runCommand])
 
   // Walking away from the screen leaves no recognizer running behind it, and
   // nothing half-said may act on tasks the user can no longer see.
   useEffect(() => {
     if (visible) return
     // Drop the turn: `stop()` below ends listening, and the words must be spent
-    // so that nothing is left for it to run.
+    // so that nothing is left for it to run. `visibleRef` also tells an answer
+    // that arrives later to go nowhere.
     clearSettle()
     spentRef.current = true
+    setThinking(false)
     if (listeningRef.current) stop()
   }, [visible, stop, clearSettle])
 
@@ -316,7 +387,7 @@ export default function VoiceCommand({
         <Mic size={28} aria-hidden="true" />
       </button>
 
-      {listening && transcript !== "" && (
+      {((listening && transcript !== "") || thinking) && (
         <div
           className="xp-balloon"
           role="status"
@@ -324,7 +395,7 @@ export default function VoiceCommand({
         >
           <div className="xp-balloon-title">
             <Mic size={16} aria-hidden="true" />
-            Dinliyorum
+            {thinking ? THINKING : "Dinliyorum"}
           </div>
           <div>{transcript}</div>
         </div>
