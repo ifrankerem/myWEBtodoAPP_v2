@@ -739,6 +739,73 @@ describe('VoiceCommand remote fallback', () => {
     expect(execute).not.toHaveBeenCalled()
     expect(unknownToasts()).toHaveLength(0)
   })
+
+  // Issue case 17 (revision round 1): the component is gone, not just hidden.
+  // `visibleRef` only tracks the last render, so unmounting must still stop a
+  // late answer from acting on tasks nobody can see any more.
+  it('case 17: throws the answer away when the component unmounts while it waits', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: ekmek al')
+    remoteHolds({ action: 'create', title: 'ekmek al' })
+
+    const { view } = setup({ tasks: [KAHVE], execute })
+    const user = userEvent.setup()
+    keepListening()
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(UNREADABLE)
+    await flush()
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+
+    await waitFor(() => expect(remote.askRemoteIntent).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    view.unmount()
+    remote.release?.()
+
+    await wait(400)
+    expect(execute).not.toHaveBeenCalled()
+    expect(toastMessages()).toHaveLength(0)
+  })
+
+  // Issue case 18 (revision round 1): an answer belongs to the turn whose
+  // sentence was spoken. Once the mic opens a newer turn, the late answer is
+  // dropped silently, and the new turn still runs the sentence of its own.
+  it('case 18: drops a late answer when a newer turn has already started', async () => {
+    const execute = vi.fn(async () => 'Görev eklendi: kahve al')
+    remoteHolds({ action: 'create', title: 'ekmek al' })
+
+    setup({ tasks: [KAHVE], execute })
+    const user = userEvent.setup()
+    keepListening()
+    await user.click(await screen.findByRole('button', { name: MIC }))
+    await sayPartial(UNREADABLE)
+    await flush()
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+
+    await waitFor(() => expect(remote.askRemoteIntent).toHaveBeenCalledTimes(1), { timeout: 2500 })
+
+    // The user taps the mic again before the worker answers: a new turn opens.
+    await user.click(micButton())
+    await waitFor(() => expect(speech.start).toHaveBeenCalledTimes(2))
+
+    remote.release?.()
+
+    await wait(400)
+    expect(execute).not.toHaveBeenCalled()
+    expect(toastMessages()).toHaveLength(0)
+    expect(screen.queryByRole('dialog', { name: 'Sesli Komut' })).not.toBeInTheDocument()
+
+    // The new turn is untouched and still runs the sentence spoken in it.
+    await sayPartial('Yeni görev kahve al')
+    await act(async () => {
+      speech.emit('listeningState', { status: 'stopped' })
+    })
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    expect(execute).toHaveBeenCalledWith({ action: 'create', title: 'kahve al' })
+  }, 3000)
 })
 
 describe('VoiceCommand settle window', () => {
