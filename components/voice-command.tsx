@@ -253,8 +253,11 @@ export default function VoiceCommand({
 
   useEffect(() => {
     if (visible) return
+    // A sentence the user never finished must not act on tasks they can no
+    // longer see. Drop the words: `stop()` below ends the turn, which is what
+    // lets the last words run, so nothing may be left to run.
     clearSettle()
-    handledRef.current = ""
+    handledRef.current = transcriptRef.current.trim()
     if (listeningRef.current) stop()
   }, [visible, stop, clearSettle])
 
