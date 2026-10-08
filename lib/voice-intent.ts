@@ -411,14 +411,33 @@ function pad(value: number): string {
   return `${value}`.padStart(2, '0')
 }
 
-/** `20:00` → `20:00`, `8:30` → `08:30`. Rejects anything off the clock. */
-function clockAt(key: string | undefined): string | null {
+/** The hour and minute a clock token carries, or null when it is not a clock. */
+function clockPartsAt(key: string | undefined): { hour: number; minute: number } | null {
   const parts = CLOCK.exec(key ?? '')
   if (!parts) return null
+
   const hour = Number(parts[1])
   const minute = Number(parts[2])
   if (hour > 23 || minute > 59) return null
-  return `${pad(hour)}:${pad(minute)}`
+  return { hour, minute }
+}
+
+/** `20:00` → `20:00`, `8:30` → `08:30`. Rejects anything off the clock. */
+function clockAt(key: string | undefined): string | null {
+  const parts = clockPartsAt(key)
+  if (!parts) return null
+  return `${pad(parts.hour)}:${pad(parts.minute)}`
+}
+
+/**
+ * The hour a part of the day means. The recognizer writes `akşam 8` as
+ * `akşam 8.00`, so a clock gets the same shift a bare hour already did.
+ *
+ * Only 1–11 can move: 13–23 and `00` already name the hour meant, and 12 would
+ * become 24, which is not a time.
+ */
+function shiftedHour(hour: number, shift: number): number {
+  return shift === 12 && hour > 0 && hour < 12 ? hour + shift : hour
 }
 
 /** `9`, `9a`, `9de` → `9`; `50` → null, because fifty o'clock is not a time. */
@@ -479,19 +498,27 @@ function timeAt(keys: string[], index: number): TimeSpan | null {
     return null
   }
 
-  // A part of the day belongs to the time after it: "akşam 20.00" is twenty
-  // o'clock, and the word is spent with the clock rather than left in the title.
-  // With a clock time the clock decides, since it already says which hour.
+  // A part of the day belongs to the time after it, and is spent with it rather
+  // than left in the title. It shifts the hour as it does for "akşam 8", because
+  // a 12-hour clock after "akşam" is that hour in the evening: "akşam 8.00" is
+  // 20:00 while "akşam 20.00" is already the evening hour.
   const part = partOfDayAt(keys, index)
   if (part !== undefined) {
     const after = index + part.length
-    const clock = clockAt(keys[after])
-    if (clock) return { start: index, length: part.length + 1, time: clock }
+
+    const clock = clockPartsAt(keys[after])
+    if (clock) {
+      const hour = shiftedHour(clock.hour, part.shift)
+      return { start: index, length: part.length + 1, time: `${pad(hour)}:${pad(clock.minute)}` }
+    }
 
     const hour = spokenHourAt(keys, after)
     if (hour === null) return null
-    const spoken = part.shift === 12 && hour.hour < 12 ? hour.hour + 12 : hour.hour
-    return { start: index, length: part.length + hour.length, time: `${pad(spoken)}:00` }
+    return {
+      start: index,
+      length: part.length + hour.length,
+      time: `${pad(shiftedHour(hour.hour, part.shift))}:00`,
+    }
   }
 
   const clock = clockAt(key)
