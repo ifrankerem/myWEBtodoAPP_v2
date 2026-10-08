@@ -10,7 +10,7 @@
 // ambient locale — so the same command parses the same way on any machine.
 
 import type { Task } from '@/lib/task'
-import { matchTaskTitles } from '@/lib/voice-match'
+import { matchTaskTitles, VOICE_FILLERS } from '@/lib/voice-match'
 
 export type VoiceRepeat = 'daily' | 'weekdays'
 
@@ -67,13 +67,34 @@ const WEEKDAY_DAYS: Record<string, number> = {
   pazar: 0,
 }
 
-const DELETE_VERBS = ['sil', 'kaldır']
+/**
+ * Delete verbs as people say them: `sil`, `siler`, `silebilir`, `silelim`,
+ * `silermisin`. Only the listed tails count, so `silgi` and `silah` stay nouns.
+ */
+const DELETE_STEMS = ['sil', 'kaldır']
+const DELETE_TAILS = ['', 'er', 'ebilir', 'abilir', 'elim', 'in', 'ir']
 const DELETE_PHRASES = [
   ['iptal', 'et'],
   ['yok', 'et'],
 ]
 
-const COMPLETE_VERBS = ['tamamla', 'tamamladım', 'bitir', 'bitirdim', 'bitti', 'yaptım']
+const COMPLETE_VERBS = [
+  'tamamla',
+  'tamamlandı',
+  'tamamladım',
+  'tamamlayabilir',
+  'bitir',
+  'bitirdim',
+  'bitti',
+  'yaptım',
+  'hallettim',
+]
+
+/** The ending a finished verb takes: `kahve aldım` for the task `kahve al`. */
+const PAST_TENSE_TAILS = ['dım', 'dim', 'dum', 'düm', 'tım', 'tim', 'tum', 'tüm']
+
+/** The question tail, which turns a verb into a polite ask. */
+const QUESTION_TAILS = ['misin', 'musun', 'müsün']
 
 const UPDATE_VERBS = ['ertele', 'taşı', 'değiştir', 'yap']
 const UPDATE_PHRASES = [
@@ -92,11 +113,28 @@ const CREATE_MARKERS = [
   ['görev', 'ekle'],
   ['görev', 'oluştur'],
   ['görev', 'kur'],
+  ['hatırlat'],
   ['ekle'],
   ['oluştur'],
 ]
 
-const LIST_WORDS = ['göster', 'listele', 'görevlerim', 'hangi', 'hangileri', 'neler']
+/**
+ * The verbal noun of a create marker names a task, not an action: "ses kaydı
+ * ekleme notu" is a note about adding a recording, and "ekleme" there must not
+ * turn the sentence into a create.
+ */
+const NOT_A_MARKER = ['ekleme', 'oluşturma', 'görevi']
+
+const LIST_WORDS = ['göster', 'listele', 'görevlerim', 'hangi', 'hangileri', 'neler', 'ne', 'var']
+
+/** "saat 9 da", "yarın da": the case suffix belongs to the time or date. */
+const DETACHED_SUFFIXES = ['da', 'de', 'ta', 'te', 'a', 'e', 'ya', 'ye', 'dan', 'den']
+
+/** "bana ... diye hatırlat": the dative opening of a reminder. */
+const REMINDER_OPENERS = ['bana', 'benim']
+
+/** "süt almayı hatırlat": the accusative of a verbal noun, minus the noun. */
+const REMINDER_SUFFIXES = ['mayı', 'meyi']
 
 const REPEATS: Array<{ words: string[]; repeat: VoiceRepeat }> = [
   { words: ['her', 'gün'], repeat: 'daily' },
@@ -123,12 +161,26 @@ function tokenKey(raw: string): string {
     .replace(/:+$/, '')
 }
 
+/**
+ * Speech recognition writes `kaydı` where the user typed `kaydi`, and the two
+ * name the same task. Folding is for comparing words only — the title keeps the
+ * spelling the user said.
+ */
+function foldI(word: string): string {
+  return word.replace(/ı/g, 'i')
+}
+
 function tokenize(text: string): Token[] {
   const tokens: Token[] = []
   for (const raw of text.split(/\s+/)) {
-    if (raw !== '') tokens.push({ raw, key: tokenKey(raw) })
+    if (raw !== '') tokens.push({ raw, key: foldI(tokenKey(raw)) })
   }
   return tokens
+}
+
+/** The keys of a stored title, for comparing it against a spoken sentence. */
+function splitWords(text: string): string[] {
+  return tokenize(text).map((token) => token.key)
 }
 
 /**
@@ -138,10 +190,15 @@ function tokenize(text: string): Token[] {
  */
 function matchesWord(key: string | undefined, word: string): boolean {
   if (key === undefined) return false
-  if (key === word) return true
-  if (word.length < 4) return false
-  const suffixLength = key.length - word.length
-  return suffixLength > 0 && suffixLength <= MAX_SUFFIX && key.startsWith(word)
+
+  // Both sides fold: keys are folded on the way in, and the tables below are
+  // written in the spelling a person uses.
+  const spoken = foldI(key)
+  const said = foldI(word)
+  if (spoken === said) return true
+  if (said.length < 4) return false
+  const suffixLength = spoken.length - said.length
+  return suffixLength > 0 && suffixLength <= MAX_SUFFIX && spoken.startsWith(said)
 }
 
 function matchesAnyWord(keys: string[], words: string[]): boolean {
@@ -256,6 +313,17 @@ function withForSuffix(keys: string[], span: Span): Span {
   return matchesWord(keys[after], 'için') ? { start: span.start, length: span.length + 1 } : span
 }
 
+/**
+ * A case suffix spoken on its own belongs to the word before it: "yarın saat 9
+ * da" is tomorrow at nine, not a title starting with "da".
+ */
+function withDetachedSuffix(keys: string[], span: Span): Span {
+  const after = span.start + span.length
+  const next = keys[after]
+  if (next === undefined) return span
+  return DETACHED_SUFFIXES.includes(next) ? { start: span.start, length: span.length + 1 } : span
+}
+
 /** `bir hafta ileri` / `bir hafta sonra`: a week, from wherever it is anchored. */
 function isAWeekLater(keys: string[], index: number): boolean {
   return (
@@ -333,10 +401,49 @@ function repeatAt(keys: string[], index: number): (Span & { repeat: VoiceRepeat 
 // Flows
 
 function createAt(keys: string[], index: number): Span | null {
+  // "ekleme" is the noun the marker makes, not the marker: a title that ends in
+  // it ("ses kaydi ekleme") must not read as a request to create.
+  if (NOT_A_MARKER.some((noun) => matchesWord(keys[index], noun))) return null
+
   for (const marker of CREATE_MARKERS) {
     if (phraseAt(keys, index, marker)) return { start: index, length: marker.length }
   }
   return null
+}
+
+/**
+ * Whether a word asks to delete: `sil`, `siler misin`, `silermisin`,
+ * `silebilir`. Only the listed verb tails count, so `silgi`, `silah` and `silik`
+ * stay nouns and can be part of a title.
+ */
+function isDeleteVerb(key: string | undefined): boolean {
+  if (key === undefined) return false
+  for (const stem of DELETE_STEMS) {
+    if (!key.startsWith(stem)) continue
+
+    const tail = key.slice(stem.length)
+    for (const ending of DELETE_TAILS) {
+      if (tail === ending) return true
+      // A question fused onto the verb: "silermisin", "silebilirmisin".
+      const question = tail.slice(ending.length)
+      if (QUESTION_TAILS.some((asked) => question === asked)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * The finished form of a task's own verb: "kahve aldım" for the task "kahve al".
+ * The sentence is the title with its last word turned into the past tense.
+ */
+function isPastTenseOf(keys: string[], titleWords: string[]): boolean {
+  if (titleWords.length === 0 || titleWords.length !== keys.length) return false
+
+  const last = titleWords[titleWords.length - 1]
+  const finished = PAST_TENSE_TAILS.some((tail) => last + tail === keys[keys.length - 1])
+  if (!finished) return false
+
+  return keys.slice(0, -1).every((key, index) => key === titleWords[index])
 }
 
 function isUpdateCommand(keys: string[]): boolean {
@@ -354,8 +461,21 @@ function isListCommand(keys: string[]): boolean {
 function remainingTitle(tokens: Token[], claimed: boolean[]): string {
   const words: string[] = []
   tokens.forEach((token, index) => {
-    if (!claimed[index]) words.push(token.raw)
+    if (claimed[index] || VOICE_FILLERS.includes(token.key)) return
+    if (REMINDER_OPENERS.includes(token.key)) return
+    words.push(token.raw)
   })
+
+  const title = words.join(' ').replace(/^[\s:;,]+/, '').trim()
+
+  // "süt almayı hatırlat" asks for the task "süt al": the reminder carries the
+  // accusative of a verbal noun, which is not part of the name.
+  const last = words.length - 1
+  const ending = words[last]
+  const suffix = REMINDER_SUFFIXES.find((tail) => ending !== undefined && ending.endsWith(tail))
+  if (suffix === undefined || ending === undefined) return title
+
+  words[last] = ending.slice(0, -suffix.length)
   return words.join(' ').replace(/^[\s:;,]+/, '').trim()
 }
 
@@ -367,10 +487,10 @@ function parseCreate(tokens: Token[], keys: string[], today: Date): VoiceIntent 
   claim(claimed, marker)
 
   const date = findSpan(keys, (index) => dateAt(keys, index, today), claimed)
-  if (date) claim(claimed, withForSuffix(keys, date))
+  if (date) claim(claimed, withDetachedSuffix(keys, withForSuffix(keys, date)))
 
   const time = findSpan(keys, (index) => timeAt(keys, index), claimed)
-  if (time) claim(claimed, time)
+  if (time) claim(claimed, withDetachedSuffix(keys, time))
 
   const repeat = findSpan(keys, (index) => repeatAt(keys, index), claimed)
   if (repeat) claim(claimed, repeat)
@@ -396,14 +516,21 @@ function parseCreate(tokens: Token[], keys: string[], today: Date): VoiceIntent 
 function parseList(keys: string[], today: Date): VoiceIntent {
   const intent: ListIntent = { action: 'list' }
 
+  const named = (word: string) =>
+    findSpan(keys, (index) => (matchesWord(keys[index], word) ? { start: index, length: 1 } : null))
+
   if (hasPhrase(keys, ['bu', 'hafta'])) {
     const monday = addDays(today, -((today.getDay() + 6) % 7))
     intent.from = toDateString(monday)
     intent.to = toDateString(addDays(monday, 6))
-  } else if (findSpan(keys, (index) => (matchesWord(keys[index], 'yarın') ? { start: index, length: 1 } : null))) {
+  } else if (named('yarın')) {
     const tomorrow = toDateString(addDays(today, 1))
     intent.from = tomorrow
     intent.to = tomorrow
+  } else if (named('bugün')) {
+    // "bugün ne var" asks about today alone, like "yarınki görevlerim".
+    intent.from = toDateString(today)
+    intent.to = toDateString(today)
   }
 
   if (findSpan(keys, (index) => (matchesWord(keys[index], 'alarmlı') ? { start: index, length: 1 } : null))) {
@@ -485,9 +612,17 @@ export function parseVoiceCommand(text: string, tasks: Task[], today: Date): Voi
   const keys = tokens.map((token) => token.key)
   if (keys.length === 0) return { action: 'unknown' }
 
-  if (matchesAnyWord(keys, DELETE_VERBS) || DELETE_PHRASES.some((phrase) => hasPhrase(keys, phrase))) {
+  // A delete or complete verb outranks a create marker: "ses kaydi ekleme
+  // notunu siler misin" deletes the note about adding a recording, it does not
+  // create a task called "ses kaydi ekleme notunu siler misin".
+  if (keys.some((key) => isDeleteVerb(key)) || DELETE_PHRASES.some((phrase) => hasPhrase(keys, phrase))) {
     return resolveFlow('delete', text, tasks, tokens, keys, today)
   }
+
+  // "kahve aldım" is the finished form of the task "kahve al", so the sentence
+  // can complete a task without naming a complete verb at all.
+  const finishedTask = tasks.find((task) => isPastTenseOf(keys, splitWords(task.title)))
+  if (finishedTask !== undefined) return { action: 'complete', task: finishedTask }
 
   if (matchesAnyWord(keys, COMPLETE_VERBS)) {
     return resolveFlow('complete', text, tasks, tokens, keys, today)
