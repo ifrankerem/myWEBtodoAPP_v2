@@ -15,6 +15,10 @@
     // Cron granularity is one minute, which is also the alarm granularity.
     "crons": ["* * * * *"]
   },
+  // Workers AI, for /voice-intent. Without the binding that endpoint answers 502.
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "VAPID_SUBJECT": "mailto:irfankeremarslann@gmail.com",
     "APP_URL": "https://my-we-btodo-app-v2.vercel.app/"
