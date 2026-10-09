@@ -84,11 +84,12 @@ describe('normalizeRemoteIntent: a title where an id was expected', () => {
     ).toEqual({ action: 'delete', taskId: 'B' })
   })
 
-  // Issue case 3
-  it('case 3: drops a title that two tasks share', () => {
+  // Issue case 3, revised: a title several tasks share is a choice to offer, not
+  // a dead end. It replaces task 15's case 3, which expected `unknown`.
+  it('case 3: offers every task that shares the title', () => {
     expect(
       normalizeRemoteIntent({ action: 'delete', taskId: 'kahve al' }, request(with_(A, B, C, D)))
-    ).toEqual({ action: 'unknown' })
+    ).toEqual({ action: 'confirm', wanted: 'delete', candidates: ['B', 'D'] })
   })
 
   // Issue case 4
@@ -106,6 +107,32 @@ describe('normalizeRemoteIntent: a title where an id was expected', () => {
     expect(
       normalizeRemoteIntent({ action: 'delete', taskId: 'kahve' }, request(with_(A, B, C)))
     ).toEqual({ action: 'unknown' })
+  })
+})
+
+describe('normalizeRemoteIntent: candidates that mix ids and titles', () => {
+  const A = { id: 'A', title: 'ses kaydi ekleme' }
+  const B = { id: 'B', title: 'kahve al' }
+  const C = { id: 'C', title: 'ekler kahve al' }
+  const D = { id: 'D', title: 'Kahve Al' }
+
+  const with_ = (...tasks: VoiceRequest['tasks']): Partial<VoiceRequest> => ({ tasks })
+
+  // Issue case 4
+  it('case 4: expands a title beside ids, keeping each id once', () => {
+    expect(
+      normalizeRemoteIntent(
+        { action: 'complete', candidates: ['kahve al', 'C', 'B'] },
+        request(with_(A, B, C, D))
+      )
+    ).toEqual({ action: 'confirm', wanted: 'complete', candidates: ['B', 'C', 'D'] })
+  })
+
+  // Issue case 5
+  it('case 5: still reads a title only one task carries', () => {
+    expect(
+      normalizeRemoteIntent({ action: 'delete', taskId: 'kahve al' }, request(with_(A, B, C)))
+    ).toEqual({ action: 'delete', taskId: 'B' })
   })
 })
 
