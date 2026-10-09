@@ -158,9 +158,3 @@ async function reconcileAlarms(
   // next snapshot rather than being skipped as "already synced".
   lastSyncedSignature = signature
 }
-
-/** Drop a single task's alarm immediately (delete / complete paths). */
-export async function clearAlarmSchedule(uid: string, taskId: string): Promise<void> {
-  if (!uid) return
-  await deleteDoc(doc(alarmsCollection(), alarmDocId(uid, taskId)))
-}

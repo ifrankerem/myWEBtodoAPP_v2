@@ -95,11 +95,4 @@ describe('alarm schedule sync', () => {
     await vi.waitFor(() => expect(firestore.getDocs).toHaveBeenCalledTimes(2))
   })
 
-  it('drops a single task alarm', async () => {
-    const { clearAlarmSchedule } = await freshModule()
-
-    await clearAlarmSchedule('user-1', 'task-1')
-
-    expect(firestore.deleteDoc).toHaveBeenCalled()
-  })
 })

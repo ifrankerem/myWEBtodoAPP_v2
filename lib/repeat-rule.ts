@@ -4,6 +4,11 @@
 // modules each parsed by hand. That string is still written to Firestore so
 // older clients and the calendar export keep working, but the structured
 // `repeatRule` map is what everything reads.
+//
+// The Cloudflare Worker keeps its own copy of the parsing in
+// worker/src/schedule.ts, because that package deliberately has no runtime
+// dependencies. tests/repeat-rule-parity.test.ts asserts the two agree; if it
+// ever fails, fix both sides rather than one.
 
 export type RepeatRule =
   | { kind: 'none' }
@@ -107,20 +112,6 @@ export function isRepeating(rule: RepeatRule): boolean {
   return rule.kind !== 'none'
 }
 
-export function describeRepeatRule(rule: RepeatRule): string {
-  switch (rule.kind) {
-    case 'none':
-      return 'Does not repeat'
-    case 'daily':
-      return rule.interval === 1 ? 'Every day' : `Every ${rule.interval} days`
-    case 'weekly': {
-      const days = rule.days.map((day) => DAY_NAMES[day]).join(', ')
-      return rule.interval === 1 ? `Weekly on ${days}` : `Every ${rule.interval} weeks on ${days}`
-    }
-    case 'monthly':
-      return `Monthly on day ${rule.dayOfMonth}`
-  }
-}
 
 function startOfDay(date: Date): Date {
   const copy = new Date(date)

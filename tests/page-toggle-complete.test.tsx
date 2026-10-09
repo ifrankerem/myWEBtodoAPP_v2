@@ -29,7 +29,6 @@ vi.mock('@/lib/auth-context', () => {
 
 vi.mock('@/lib/storage-idb', () => ({
   getTasks: vi.fn().mockResolvedValue([]),
-  fileToBase64: vi.fn(),
 }))
 
 vi.mock('@/lib/storage-cloud', () => ({

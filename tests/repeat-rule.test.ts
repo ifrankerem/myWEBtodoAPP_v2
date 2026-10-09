@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  describeRepeatRule,
   nextRepeatOccurrence,
   parseLegacyRepeats,
   toLegacyRepeats,
@@ -142,17 +141,3 @@ describe('nextRepeatOccurrence', () => {
   })
 })
 
-describe('describeRepeatRule', () => {
-  it('describes each rule kind', () => {
-    expect(describeRepeatRule({ kind: 'none' })).toBe('Does not repeat')
-    expect(describeRepeatRule({ kind: 'daily', interval: 1 })).toBe('Every day')
-    expect(describeRepeatRule({ kind: 'daily', interval: 2 })).toBe('Every 2 days')
-    expect(describeRepeatRule({ kind: 'weekly', days: [1, 3], interval: 1 })).toBe(
-      'Weekly on Mon, Wed'
-    )
-    expect(describeRepeatRule({ kind: 'weekly', days: [1], interval: 3 })).toBe(
-      'Every 3 weeks on Mon'
-    )
-    expect(describeRepeatRule({ kind: 'monthly', dayOfMonth: 9 })).toBe('Monthly on day 9')
-  })
-})

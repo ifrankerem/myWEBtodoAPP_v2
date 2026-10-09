@@ -144,11 +144,6 @@ export function generateICSCalendar(events: CalendarEvent[]): string {
   return [header, ...eventStrings, footer].join('\r\n');
 }
 
-// Export single task to ICS
-export async function exportTaskToICS(task: CalendarEvent): Promise<void> {
-  const icsContent = generateICSCalendar([task]);
-  await downloadICS(icsContent, `task-${task.id}.ics`);
-}
 
 // Export all tasks with alarms to ICS
 export async function exportAllAlarmsToICS(tasks: CalendarEvent[]): Promise<void> {
