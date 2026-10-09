@@ -38,6 +38,19 @@ describe('toRepeatRule', () => {
     expect(toRepeatRule({})).toEqual({ kind: 'none' })
     expect(toRepeatRule({ repeatRule: { kind: 'weekly', days: [] } })).toEqual({ kind: 'none' })
   })
+
+  it('honours an explicit none even when a legacy string is still on the row', () => {
+    // A row written before repeatRule existed carries both. The client reads
+    // this as one-shot, so the worker must too: otherwise it re-arms the alarm
+    // forever and pushes it again every minute.
+    expect(toRepeatRule({ repeatRule: { kind: 'none' }, repeats: 'Mon, Wed' })).toEqual({ kind: 'none' })
+    expect(
+      getNextRepeatFireAt(
+        { alarm: '08:00', repeats: 'Mon, Wed', repeatRule: { kind: 'none' }, tz: IST },
+        AUG_5_0800_IST,
+      ),
+    ).toBeNull()
+  })
 })
 
 describe('getNextRepeatFireAt', () => {

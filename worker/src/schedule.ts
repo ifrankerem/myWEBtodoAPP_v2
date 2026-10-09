@@ -72,6 +72,11 @@ export function toRepeatRule(source: {
       const dayOfMonth = Math.trunc(Number(rule.dayOfMonth))
       if (dayOfMonth >= 1 && dayOfMonth <= 31) return { kind: 'monthly', dayOfMonth }
     }
+
+    // An explicit "does not repeat" outranks the legacy string, exactly as
+    // lib/repeat-rule.ts reads it: a row carrying both fields must not have the
+    // worker resurrecting a weekly alarm the app considers one-shot.
+    if (rule.kind === 'none') return { kind: 'none' }
   }
 
   const legacyDays = parseLegacyRepeats(source.repeats)

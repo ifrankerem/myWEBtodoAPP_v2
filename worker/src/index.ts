@@ -57,6 +57,29 @@ function projectIdOf(env: Env): string {
   return (JSON.parse(env.FIREBASE_SERVICE_ACCOUNT).project_id as string) ?? ''
 }
 
+/**
+ * Budget on the paid model endpoint: 30 requests a minute per user. Nobody
+ * speaks 30 commands in a minute, so it only ever bites someone looping it.
+ *
+ * shortcut: the counter lives in this isolate's module scope, so it resets when
+ * the isolate is evicted and does not span isolates. That is enough to stop a
+ * single client draining the account quota; if the endpoint ever needs a real
+ * quota, move it to Durable Objects or a KV counter.
+ */
+const VOICE_RATE_LIMIT = 30
+const VOICE_RATE_WINDOW_MS = 60_000
+const voiceHits = new Map<string, { count: number; resetAt: number }>()
+
+function voiceRateLimited(uid: string, now: number): boolean {
+  const hit = voiceHits.get(uid)
+  if (hit === undefined || hit.resetAt <= now) {
+    voiceHits.set(uid, { count: 1, resetAt: now + VOICE_RATE_WINDOW_MS })
+    return false
+  }
+  hit.count += 1
+  return hit.count > VOICE_RATE_LIMIT
+}
+
 /** A response carrying the CORS headers, if the origin is one we answer. */
 function jsonWithCors(body: unknown, status: number, origin: string | null, env: Env): Response {
   return Response.json(body, { status, headers: corsHeaders(origin, env) })
@@ -73,8 +96,9 @@ async function handleVoiceIntent(request: Request, env: Env, origin: string | nu
     return jsonWithCors({ error: 'unauthorized' }, 401, origin, env)
   }
 
+  let uid: string
   try {
-    await verifyFirebaseIdToken(authorization.slice('Bearer '.length), projectIdOf(env))
+    ;({ uid } = await verifyFirebaseIdToken(authorization.slice('Bearer '.length), projectIdOf(env)))
   } catch (error) {
     console.warn('voice-intent auth failed', (error as Error).message)
     return jsonWithCors({ error: 'unauthorized' }, 401, origin, env)
@@ -90,6 +114,12 @@ async function handleVoiceIntent(request: Request, env: Env, origin: string | nu
     return jsonWithCors({ error: 'bad request' }, 400, origin, env)
   }
 
+  // Keyed on the uid the token proved, never on anything in the body. A caller
+  // who cannot get past the token check cannot spend the model quota either.
+  if (voiceRateLimited(uid, Date.now())) {
+    return jsonWithCors({ error: 'too many requests' }, 429, origin, env)
+  }
+
   try {
     return jsonWithCors(await resolveVoiceIntent(env.AI, body as VoiceRequest), 200, origin, env)
   } catch (error) {
@@ -98,8 +128,15 @@ async function handleVoiceIntent(request: Request, env: Env, origin: string | nu
   }
 }
 
-/** Cap per run so one bad batch cannot blow the worker's CPU budget. */
-const MAX_ALARMS_PER_RUN = 200
+/** Rows one query pulls, so a single response cannot overflow the worker. */
+const MAX_ALARMS_PER_QUERY = 200
+
+/**
+ * Ceiling on one run. A backlog drains over consecutive runs rather than
+ * sitting in the query window until it is more than an hour late and gets
+ * reported as missed.
+ */
+const MAX_ALARMS_PER_RUN = 1000
 
 /**
  * Alarms more than an hour late are skipped rather than delivered — a stale
@@ -187,15 +224,37 @@ export async function runAlarmSweep(env: Env, now = Date.now()): Promise<RunSumm
   }
 
   const firestore = new FirestoreClient(env.FIREBASE_SERVICE_ACCOUNT, env.FIREBASE_PROJECT_ID)
-  const documents = await firestore.queryDueAlarms(now, MAX_ALARMS_PER_RUN)
+  const alarms: AlarmRecord[] = []
 
-  const alarms = documents
-    .map((doc) => toAlarmRecord(doc.name, readFields(doc.fields)))
-    .filter((alarm): alarm is AlarmRecord => alarm !== null)
+  for (;;) {
+    const due = await firestore.queryDueAlarms(now, MAX_ALARMS_PER_QUERY)
+    const batch = due
+      .map((doc) => toAlarmRecord(doc.name, readFields(doc.fields)))
+      .filter((alarm): alarm is AlarmRecord => alarm !== null)
+
+    if (batch.length === 0) break
+
+    await deliverBatch(batch, env, firestore, vapid, summary, now)
+
+    // Re-armed rows move their own fireAt into the future, so the next query
+    // cannot pick the same alarm up twice.
+    alarms.push(...batch)
+    if (alarms.length >= MAX_ALARMS_PER_RUN) break
+  }
 
   summary.due = alarms.length
-  if (alarms.length === 0) return summary
+  return summary
+}
 
+/** Push one batch of due alarms and re-arm each of them. */
+async function deliverBatch(
+  alarms: AlarmRecord[],
+  env: Env,
+  firestore: FirestoreClient,
+  vapid: VapidKeys,
+  summary: RunSummary,
+  now: number
+): Promise<void> {
   // One subscription fetch per user, not per alarm.
   const subscriptionsByUid = new Map<string, Array<PushSubscriptionKeys & { id: string }>>()
   for (const uid of new Set(alarms.map((alarm) => alarm.uid))) {
@@ -298,8 +357,6 @@ export async function runAlarmSweep(env: Env, now = Date.now()): Promise<RunSumm
       summary.errors.push(`rearm ${alarm.id}: ${(error as Error).message}`)
     }
   }
-
-  return summary
 }
 
 export default {
