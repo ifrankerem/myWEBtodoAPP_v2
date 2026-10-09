@@ -61,6 +61,20 @@ function buildAlarmDocument(uid: string, task: AlarmTaskInput, fireAt: number): 
   }
 }
 
+/** Everything about a task the alarm mirror depends on. */
+function alarmSignature(task: AlarmTaskInput): unknown {
+  return [
+    task.id,
+    task.title,
+    task.detail?.trim() ?? '',
+    task.alarm ?? '',
+    task.repeats ?? '',
+    JSON.stringify(task.repeatRule ?? null),
+    task.dueDate ?? '',
+    task.completed === true,
+  ]
+}
+
 /**
  * Reconcile the whole `alarms` collection for a user against their current
  * task list: upsert alarms that should fire, drop everything else.
@@ -70,6 +84,29 @@ function buildAlarmDocument(uid: string, task: AlarmTaskInput, fireAt: number): 
 export async function syncAlarmSchedule(uid: string, tasks: AlarmTaskInput[]): Promise<void> {
   if (!uid) return
 
+  // The snapshot callback fires for every write to the task list, and almost all
+  // of them leave the schedule alone, so nothing is read until something did.
+  // The uid is part of it: this module outlives a sign-out, and the next user's
+  // first sync must not be skipped as "already synced".
+  const signature = JSON.stringify([uid, tasks.map(alarmSignature)])
+  if (signature === lastSyncedSignature) return
+
+  // One run at a time: the callback can fire again while the read and the writes
+  // of the previous run are still in the air, and two overlapping reconciles
+  // both write from the same snapshot.
+  const run = (syncInFlight ?? Promise.resolve()).then(() => reconcileAlarms(uid, tasks, signature))
+  syncInFlight = run.catch(() => undefined)
+  return run
+}
+
+let lastSyncedSignature: string | null = null
+let syncInFlight: Promise<void> | null = null
+
+async function reconcileAlarms(
+  uid: string,
+  tasks: AlarmTaskInput[],
+  signature: string
+): Promise<void> {
   const now = new Date()
   const desired = new Map<string, AlarmDocument>()
 
@@ -116,6 +153,10 @@ export async function syncAlarmSchedule(uid: string, tasks: AlarmTaskInput[]): P
   }
 
   await Promise.all(writes)
+
+  // Remembered only once the writes landed, so a failed run is retried on the
+  // next snapshot rather than being skipped as "already synced".
+  lastSyncedSignature = signature
 }
 
 /** Drop a single task's alarm immediately (delete / complete paths). */

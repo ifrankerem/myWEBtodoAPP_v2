@@ -53,9 +53,10 @@ export function startForegroundReminder(task: AlarmTaskInput): void {
 
   const delay = fireAt - Date.now();
 
-  // setTimeout clamps above ~24.8 days, so skip anything that far out; the
-  // schedule is recomputed every time the task list changes anyway.
-  if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+  // setTimeout clamps above ~24.8 days (2^31-1 ms) and fires immediately once it
+  // does, so anything past that is left to the next recompute of the schedule.
+  const MAX_TIMER_DELAY_MS = 24 * 24 * 60 * 60 * 1000;
+  if (delay <= 0 || delay > MAX_TIMER_DELAY_MS) return;
 
   console.log(`Scheduling foreground reminder for "${task.title}" in ${Math.round(delay / 1000 / 60)} minutes`);
   
