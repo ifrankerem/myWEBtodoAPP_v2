@@ -1,6 +1,14 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes } from "react"
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type HTMLAttributes,
+  type PointerEvent as ReactPointerEvent,
+} from "react"
 import {
   DndContext,
   closestCenter,
@@ -58,6 +66,16 @@ interface Status {
 
 const UNDO_WINDOW_MS = 6000
 
+/**
+ * How long a task has to be held before the press means "select this" instead of
+ * "open this". Long enough not to fire while a finger is still travelling, short
+ * enough to feel like holding something.
+ */
+export const LONG_PRESS_MS = 500
+
+/** How far the pointer may travel and still count as a press rather than a drag. */
+const LONG_PRESS_MOVE_PX = 8
+
 interface ItemProps {
   task: Task
   view: TaskView
@@ -66,13 +84,15 @@ interface ItemProps {
   animation?: "completing" | "leaving" | "crumpling"
   onOpen: (task: Task, origin: Element) => void
   onCheck: (task: Task, button: HTMLButtonElement) => void
+  /** The press a long press is measured from: down, moving, up. */
+  onPress?: (task: Task, phase: "start" | "move" | "end", event: PointerEvent) => void
   grip?: { attributes: HTMLAttributes<HTMLButtonElement>; listeners?: HTMLAttributes<HTMLButtonElement> }
   style?: CSSProperties
   setNodeRef?: (node: HTMLElement | null) => void
   dragging?: boolean
 }
 
-function TaskItem({ task, view, selectMode, selected, animation, onOpen, onCheck, grip, style, setNodeRef, dragging }: ItemProps) {
+function TaskItem({ task, view, selectMode, selected, animation, onOpen, onCheck, onPress, grip, style, setNodeRef, dragging }: ItemProps) {
   const repeating = isRepeating(toRepeatRule(task))
   const checked = selectMode ? selected : Boolean(task.completed)
   const checkLabel = selectMode
@@ -108,8 +128,17 @@ function TaskItem({ task, view, selectMode, selected, animation, onOpen, onCheck
     <button type="button" className="xp-grip" aria-label={`Reorder ${task.title}`} {...grip.attributes} {...grip.listeners} />
   )
 
+  // Reordering starts at the grip, so a press here cannot turn into a drag: the
+  // long press does not have to outrace the touch-drag delay.
+  const press = onPress && {
+    onPointerDown: (event: ReactPointerEvent) => onPress(task, "start", event.nativeEvent),
+    onPointerMove: (event: ReactPointerEvent) => onPress(task, "move", event.nativeEvent),
+    onPointerUp: (event: ReactPointerEvent) => onPress(task, "end", event.nativeEvent),
+    onPointerCancel: (event: ReactPointerEvent) => onPress(task, "end", event.nativeEvent),
+  }
+
   const open = (
-    <button type="button" className="xp-item-open" onClick={(event) => onOpen(task, event.currentTarget.querySelector(".xp-thumb") ?? event.currentTarget)}>
+    <button type="button" className="xp-item-open" onClick={(event) => onOpen(task, event.currentTarget.querySelector(".xp-thumb") ?? event.currentTarget)} {...press}>
       <XpTaskThumb task={task} size={view === "grid" ? 44 : 22} repeating={repeating} />
       {view === "grid" ? (
         <span className="xp-item-text">
@@ -190,6 +219,14 @@ export default function TasksGridScreen({
     window.clearTimeout(statusTimer.current)
   }, [])
 
+  // A press held as the screen goes must not fire against a task list nobody
+  // sees any more.
+  useEffect(() => () => {
+    const press = pressRef.current
+    if (press) window.clearTimeout(press.timer)
+    pressRef.current = null
+  }, [])
+
   const showStatus = (next: Status | null) => {
     window.clearTimeout(statusTimer.current)
     setStatus(next)
@@ -237,6 +274,11 @@ export default function TasksGridScreen({
   }
 
   const openTask = (task: Task, origin: Element) => {
+    // The click a browser sends after a long press belongs to that press.
+    if (spentPressRef.current) {
+      spentPressRef.current = false
+      return
+    }
     if (selectMode) {
       toggleSelected(task.id)
       return
@@ -247,6 +289,59 @@ export default function TasksGridScreen({
 
   const toggleSelected = (id: string) => {
     setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  }
+
+  // Holding a task is how several of them are selected at once: the screen has a
+  // Select button for anyone who would rather not hold anything, but a press is
+  // the shortcut. The release that follows must not also open the task, so the
+  // click a browser sends afterwards is spent here instead.
+  const pressRef = useRef<{ id: string; timer: number; x: number; y: number } | null>(null)
+  const spentPressRef = useRef(false)
+  // The timer fires after the press began, so it asks for the mode as it is then.
+  const selectModeRef = useRef(selectMode)
+  selectModeRef.current = selectMode
+
+  const clearPress = () => {
+    const press = pressRef.current
+    if (!press) return
+    window.clearTimeout(press.timer)
+    pressRef.current = null
+  }
+
+  const handlePress = (task: Task, phase: "start" | "move" | "end", event: PointerEvent) => {
+    if (phase === "end") {
+      clearPress()
+      return
+    }
+
+    if (phase === "start") {
+      clearPress()
+      spentPressRef.current = false
+      // Reordering is already off in select mode, and the grip is the only drag
+      // handle, so a press here is never the start of a reorder.
+      pressRef.current = {
+        id: task.id,
+        x: event.clientX,
+        y: event.clientY,
+        timer: window.setTimeout(() => {
+          pressRef.current = null
+          spentPressRef.current = true
+          if (selectModeRef.current) {
+            toggleSelected(task.id)
+            return
+          }
+          setSelectMode(true)
+          setSelected([task.id])
+        }, LONG_PRESS_MS),
+      }
+      return
+    }
+
+    // A press that has become a drag is not a press any more.
+    const press = pressRef.current
+    if (!press) return
+    const moved = Math.hypot(event.clientX - press.x, event.clientY - press.y)
+    if (moved > LONG_PRESS_MOVE_PX) clearPress()
   }
 
   const setAnimation = (id: string, animation: ItemProps["animation"]) =>
@@ -319,6 +414,32 @@ export default function TasksGridScreen({
     setSelected([])
   }
 
+  /**
+   * Completes everything selected in one go, with one Undo for the lot. The undo
+   * asks for each task again: the page decides from the list as it is now, so a
+   * second call is the restore.
+   */
+  const completeSelected = async () => {
+    const ids = selected.filter((id) => !tasks.find((task) => task.id === id)?.completed)
+    if (!onToggleComplete || ids.length === 0) return
+    busy.current = true
+    ids.forEach((id) => setAnimation(id, "leaving"))
+    await wait(240)
+    ids.forEach((id) => onToggleComplete(id))
+    ids.forEach(clearAnimation)
+    busy.current = false
+
+    setSelectMode(false)
+    setSelected([])
+    const first = tasks.find((task) => task.id === ids[0])
+    showStatus({
+      text: ids.length === 1
+        ? `Moved “${first?.title ?? "task"}” to Completed.`
+        : `Moved ${ids.length} tasks to Completed.`,
+      undo: () => { ids.forEach((id) => onToggleComplete(id)); showStatus(null) },
+    })
+  }
+
   const title = isCompletedView ? "Completed" : "My Tasks"
   const icon = isCompletedView ? "folderDone" : "folderTasks"
 
@@ -331,6 +452,7 @@ export default function TasksGridScreen({
       animation: animations[task.id],
       onOpen: openTask,
       onCheck: handleCheck,
+      onPress: handlePress,
     }
     return sortable ? <SortableTaskItem key={task.id} {...props} /> : <TaskItem key={task.id} {...props} />
   }
@@ -412,6 +534,14 @@ export default function TasksGridScreen({
             <span className="xp-tcount">{selected.length} selected</span>
             <span className="xp-tspace" />
             {isCompletedView && <XpToolButton icon="restore" label="Restore" disabled={!selected.length} onClick={restoreSelected} />}
+            {!isCompletedView && (
+              <XpToolButton
+                icon="check"
+                label={selected.length ? `Complete (${selected.length})` : "Complete"}
+                disabled={!selected.length}
+                onClick={() => void completeSelected()}
+              />
+            )}
             <XpToolButton
               icon="del"
               label={selected.length ? `Delete (${selected.length})` : "Delete"}
@@ -459,6 +589,7 @@ export default function TasksGridScreen({
             </div>
             <XpToolSeparator />
             {!isCompletedView && <XpToolButton icon="newTask" label="New Task" onClick={onAddTask} />}
+            <XpToolButton icon="check" label="Select" disabled={tasks.length === 0} onClick={() => { setSelectMode(true); setSelected([]) }} />
             <XpToolButton icon="del" label="Delete" disabled={tasks.length === 0} onClick={() => { setSelectMode(true); setSelected([]) }} />
           </>
         )}
