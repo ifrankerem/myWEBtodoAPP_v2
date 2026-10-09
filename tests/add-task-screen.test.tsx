@@ -17,9 +17,11 @@ describe('AddTaskScreen', () => {
     await user.type(screen.getByLabelText('Title'), '   ')
     await user.click(screen.getByRole('button', { name: /save task/i }))
 
+    // The photo arrives already compressed inside the draft, so there is no
+    // second argument to pass and nothing is compressed twice.
     expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Untitled Task' }),
-      undefined,
+      expect.objectContaining({ title: 'Untitled Task', photo: undefined }),
     )
+    expect(onSave.mock.calls[0]).toHaveLength(1)
   })
 })

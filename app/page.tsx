@@ -28,7 +28,7 @@ import {
   WelcomeScreen,
 } from "@/components/xp-shell"
 import { useAuth } from "@/lib/auth-context"
-import { getTasks as getLocalTasks, fileToBase64 } from "@/lib/storage-idb"
+import { getTasks as getLocalTasks } from "@/lib/storage-idb"
 import {
   subscribeToTasks,
   createCloudTask,
@@ -57,7 +57,10 @@ import {
   subscribeToMissedAlarms,
   type MissedAlarm,
 } from "@/lib/missed-alarms"
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
+import type { Status } from "@/components/tasks-grid-screen"
+
+/** How long the Explorer-style copy dialog shows after Save Task. */
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
@@ -102,6 +105,10 @@ export default function Page() {
   // lookup reads the list as it is now, whatever render created the function.
   const tasksRef = useRef<Task[]>(tasks)
   tasksRef.current = tasks
+  // The delete/undo plumbing below reaches for the delete handler as it is now,
+  // so a timer armed once must not keep calling a stale one. The handler is
+  // declared further down, hence the indirection.
+  const handleDeleteTaskRef = useRef<(taskId: string) => void>(() => {})
   const [loading, setLoading] = useState(true)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
   const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
@@ -109,6 +116,9 @@ export default function Page() {
   const [missedAlarms, setMissedAlarms] = useState<MissedAlarm[]>([])
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const migrationDoneRef = useRef(false)
+  // Alarm fields the last notification rebuild covered; see the signature check
+  // in the snapshot callback.
+  const notificationsSignatureRef = useRef<string | null>(null)
   // Task id from a ?task=<id> notification deep link, held until tasks load.
   const pendingTaskIdRef = useRef<string | null>(null)
 
@@ -171,12 +181,16 @@ export default function Page() {
           const localTasks = await getLocalTasks()
           if (localTasks.length > 0) {
             const result = await migrateLocalToCloud(user.uid, localTasks)
-            if (result.migrated > 0) {
+            if (result.error) {
+              console.error('Migration error:', result.error)
+              toast.error('Could not move your saved tasks to the cloud.')
+            } else if (result.migrated > 0) {
               console.log(`Migrated ${result.migrated} tasks to cloud`)
             }
           }
         } catch (err) {
           console.error('Migration error:', err)
+          toast.error('Could not move your saved tasks to the cloud.')
         }
         migrationDoneRef.current = true
       }
@@ -187,7 +201,9 @@ export default function Page() {
         setTasks(loadedTasks)
         setLoading(false)
 
-        // Initialize notifications for all tasks with alarms
+        // Rebuilding every native notification costs two bridge round trips per
+        // task, and the snapshot fires on every write — so only re-arm when an
+        // alarm field actually changed.
         const taskData = loadedTasks.map(t => ({
           id: t.id,
           title: t.title,
@@ -197,9 +213,15 @@ export default function Page() {
           dueDate: t.dueDate,
           completed: t.completed,
         }))
-        
-        initializeNotifications(taskData)
-        initializeForegroundReminders(taskData)
+
+        const notificationSignature = JSON.stringify(
+          taskData.map(t => [t.id, t.title, t.alarm ?? '', t.repeats ?? '', JSON.stringify(t.repeatRule ?? null), t.dueDate ?? '', t.completed === true])
+        )
+        if (notificationSignature !== notificationsSignatureRef.current) {
+          notificationsSignatureRef.current = notificationSignature
+          initializeNotifications(taskData)
+          initializeForegroundReminders(taskData)
+        }
 
         // Foreground timers die the moment iOS suspends the PWA, so mirror the
         // schedule to Firestore and let the push worker deliver it instead.
@@ -353,7 +375,7 @@ export default function Page() {
     navigate(screen, origin)
   }
 
-  const handleAddTask = async (newTask: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => {
+  const handleAddTask = async (newTask: Omit<Task, "id" | "createdDate" | "lastEditedDate">) => {
     if (!user) return
 
     // Navigate back immediately so offline doesn't block the UI
@@ -372,12 +394,10 @@ export default function Page() {
     // Fire-and-forget: Firestore will queue offline writes automatically
     ;(async () => {
       try {
-        let photoBase64: string | undefined
-        
-        if (photoFile) {
-          photoBase64 = await fileToBase64(photoFile)
-        }
-        
+        // The Properties sheet already compressed this for its preview; doing it
+        // again here re-ran canvas work on the save path for nothing.
+        const photoBase64 = newTask.photo || undefined
+
         const created = await createCloudTask(user.uid, {
           title: newTask.title,
           detail: newTask.detail,
@@ -413,7 +433,7 @@ export default function Page() {
         if (newTask.dueDate) {
           const dueDate = parseTaskDate(newTask.dueDate)
           if (dueDate.getMonth() === 11 && dueDate.getDate() === 20) {
-            const hasBirthdayTask = tasks.some(
+            const hasBirthdayTask = tasksRef.current.some(
               (t) => t.title === "İrfan Kerem Arslan DOGUM GÜNÜ" && t.dueDate === newTask.dueDate
             )
             if (!hasBirthdayTask) {
@@ -426,6 +446,9 @@ export default function Page() {
         }
       } catch (err) {
         console.error('Error creating task:', err)
+        // The window already closed and the copy dialog already played, so
+        // without this the task is simply gone and nobody is told.
+        toast.error('Could not save the task.')
       }
     })()
   }
@@ -434,15 +457,27 @@ export default function Page() {
     if (!user) return
     cancelTaskNotification(taskId)
     stopForegroundReminder(taskId)
-    await deleteCloudTask(user.uid, taskId)
+    try {
+      await deleteCloudTask(user.uid, taskId)
+    } catch (error) {
+      console.error('Error deleting task:', error)
+      toast.error('Could not delete the task.')
+    }
   }
+  handleDeleteTaskRef.current = handleDeleteTask
 
   const handleToggleComplete = async (taskId: string) => {
     if (!user) return
     const task = tasksRef.current.find(t => t.id === taskId)
     if (!task) return
-    
-    await toggleCloudTaskComplete(user.uid, taskId, task.completed || false)
+
+    try {
+      await toggleCloudTaskComplete(user.uid, taskId, task.completed || false)
+    } catch (error) {
+      console.error('Error toggling task:', error)
+      toast.error('Could not update the task.')
+      return
+    }
     
     if (!task.completed) {
       cancelTaskNotification(taskId)
@@ -479,7 +514,13 @@ export default function Page() {
     if ('repeats' in updates) storageUpdates.repeats = updates.repeats ?? null
     if ('repeatRule' in updates) storageUpdates.repeatRule = updates.repeatRule ?? null
     
-    await updateCloudTask(user.uid, taskId, storageUpdates)
+    try {
+      await updateCloudTask(user.uid, taskId, storageUpdates)
+    } catch (error) {
+      console.error('Error updating task:', error)
+      toast.error('Could not save the changes.')
+      return
+    }
     
     // Update notification if alarm changed
     const task = tasks.find(t => t.id === taskId)
@@ -528,6 +569,56 @@ export default function Page() {
   const handleReloadTasks = async () => {
     // No-op: real-time subscription handles this automatically
   }
+
+  const [taskStatus, setTaskStatus] = useState<Status | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; timer: number } | null>(null)
+  const pendingDeleteRef = useRef<{ ids: string[]; timer: number } | null>(null)
+  const taskStatusTimer = useRef<number | undefined>(undefined)
+
+  const showTaskStatus = useCallback((next: Status | null) => {
+    window.clearTimeout(taskStatusTimer.current)
+    setTaskStatus(next)
+    if (next) taskStatusTimer.current = window.setTimeout(() => setTaskStatus(null), 6000)
+  }, [])
+
+  /** Commits a delete that has waited out its undo window. */
+  const commitPendingDelete = useCallback((ids: string[]) => {
+    ids.forEach((id) => { void handleDeleteTaskRef.current(id) })
+  }, [])
+
+  /** The grid confirmed a delete: wait out the undo window, then commit. */
+  const armPendingDelete = useCallback((ids: string[]) => {
+    const previous = pendingDeleteRef.current
+    if (previous) window.clearTimeout(previous.timer)
+
+    const timer = window.setTimeout(() => {
+      pendingDeleteRef.current = null
+      setPendingDelete(null)
+      commitPendingDelete(ids)
+    }, 6000)
+    const entry = { ids, timer }
+    pendingDeleteRef.current = entry
+    setPendingDelete(entry)
+  }, [commitPendingDelete])
+
+  /** Undo: drop the waiting delete. Nothing was written yet, so it just stops. */
+  const undoPendingDelete = useCallback(() => {
+    const pending = pendingDeleteRef.current
+    if (pending) window.clearTimeout(pending.timer)
+    pendingDeleteRef.current = null
+    setPendingDelete(null)
+  }, [])
+
+  // An undo window can still be open when the tab goes away; commit it there
+  // rather than leaving a delete that never lands.
+  useEffect(() => () => {
+    const pending = pendingDeleteRef.current
+    if (pending) {
+      window.clearTimeout(pending.timer)
+      commitPendingDelete(pending.ids)
+    }
+    window.clearTimeout(taskStatusTimer.current)
+  }, [commitPendingDelete])
 
   // Voice commands run through the same handlers as the screens, so a spoken
   // command and a typed one leave the same task behind.
@@ -661,24 +752,37 @@ export default function Page() {
                 }}
                 onDeleteTask={handleDeleteTask}
                 onToggleComplete={handleToggleComplete}
+                pendingDelete={pendingDelete}
+                status={taskStatus}
+                onStatus={showTaskStatus}
+                onPendingDelete={armPendingDelete}
+                onUndoPendingDelete={undoPendingDelete}
                 onReorderTasks={async (reorderedTasks) => {
                   if (!user) return
                   const completedTasks = tasks.filter(t => t.completed)
                   const allTasks = [...reorderedTasks, ...completedTasks]
                   setTasks(allTasks)
-                  await saveCloudTasks(user.uid, allTasks.map(t => ({
-                    id: t.id,
-                    title: t.title,
-                    detail: t.detail,
-                    photo: t.photo || undefined,
-                    completed: t.completed || false,
-                    createdAt: t.createdDate.toISOString(),
-                    updatedAt: t.lastEditedDate.toISOString(),
-                    alarm: t.alarm,
-                    repeats: t.repeats,
-                    repeatRule: t.repeatRule,
-                    dueDate: t.dueDate,
-                  })))
+                  try {
+                    // Explicit nulls, not omissions: a merge keeps every field the
+                    // payload leaves out, so omitting `alarm` here would bring
+                    // back an alarm the user had turned off.
+                    await saveCloudTasks(user.uid, allTasks.map(t => ({
+                      id: t.id,
+                      title: t.title,
+                      detail: t.detail ?? null,
+                      photo: t.photo ?? null,
+                      completed: t.completed || false,
+                      createdAt: t.createdDate.toISOString(),
+                      updatedAt: t.lastEditedDate.toISOString(),
+                      alarm: t.alarm ?? null,
+                      repeats: t.repeats ?? null,
+                      repeatRule: t.repeatRule ?? null,
+                      dueDate: t.dueDate ?? null,
+                    })))
+                  } catch (error) {
+                    console.error('Error saving task order:', error)
+                    toast.error('Could not save the new order.')
+                  }
                 }}
               />
             )}
@@ -720,9 +824,9 @@ export default function Page() {
             )}
             {currentScreen === "add" && (
               <AddTaskScreen
-                onSave={(task, photoFile) => {
+                onSave={(task) => {
                   setCalendarDueDate(undefined)
-                  handleAddTask(task, photoFile)
+                  handleAddTask(task)
                 }}
                 onCancel={() => {
                   setCalendarDueDate(undefined)
@@ -740,6 +844,19 @@ export default function Page() {
               />
             )}
           </>
+        )}
+
+        {/* The status line lives here, not in the grid: the grid unmounts the
+            moment another screen opens, and a delete's Undo cannot go with it. */}
+        {taskStatus && (
+          <div className="xp-statusbar is-undo" role="status">
+            <span className="xp-sb is-grow">
+              <span>{taskStatus.text}</span>
+              {taskStatus.undo && (
+                <button type="button" className="xp-link" onClick={taskStatus.undo}>Undo</button>
+              )}
+            </span>
+          </div>
         )}
 
         <Taskbar

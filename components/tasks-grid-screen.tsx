@@ -57,9 +57,20 @@ interface TasksGridScreenProps {
   onReorderTasks?: (tasks: Task[]) => void
   onBack?: () => void
   isCompletedView?: boolean
+  /**
+   * A delete waiting out its undo window, and the way to show its status line.
+   * The page owns both, so Undo survives leaving this screen: the grid unmounts
+   * the moment another screen opens, and a delete committed there was gone
+   * before the window closed.
+   */
+  pendingDelete?: { ids: string[]; timer: number } | null
+  status?: Status | null
+  onStatus?: (status: Status | null) => void
+  onPendingDelete?: (ids: string[]) => void
+  onUndoPendingDelete?: () => void
 }
 
-interface Status {
+export interface Status {
   text: string
   undo?: () => void
 }
@@ -183,6 +194,11 @@ export default function TasksGridScreen({
   onReorderTasks,
   onBack,
   isCompletedView = false,
+  pendingDelete: pendingDeleteProp = null,
+  status: statusProp,
+  onStatus,
+  onPendingDelete,
+  onUndoPendingDelete,
 }: TasksGridScreenProps) {
   const [view, setView] = useState<TaskView>("grid")
   const [groups, setGroups] = useState(true)
@@ -194,9 +210,18 @@ export default function TasksGridScreen({
   const [animations, setAnimations] = useState<Record<string, ItemProps["animation"]>>({})
   const [hiddenIds, setHiddenIds] = useState<string[]>([])
   const [status, setStatus] = useState<Status | null>(null)
-  const pendingDelete = useRef<{ ids: string[]; timer: number } | null>(null)
   const statusTimer = useRef<number | undefined>(undefined)
+  const pendingDelete = useRef<{ ids: string[]; timer: number } | null>(pendingDeleteProp)
   const busy = useRef(false)
+
+  // The status line and the delete it offers Undo for outlive this screen, so
+  // whatever the page hands down wins over a fresh mount's empty state.
+  useEffect(() => {
+    if (statusProp !== undefined) setStatus(statusProp)
+  }, [statusProp])
+  useEffect(() => {
+    if (pendingDeleteProp !== undefined) pendingDelete.current = pendingDeleteProp
+  }, [pendingDeleteProp])
 
   useEffect(() => {
     const storedView = window.localStorage.getItem("task-view")
@@ -204,7 +229,8 @@ export default function TasksGridScreen({
     if (window.localStorage.getItem("task-groups") === "off") setGroups(false)
   }, [])
 
-  // Deletes wait out the undo window; leaving the screen commits them.
+  // Deletes wait out the undo window. Nothing commits this list down here: the
+  // page holds the timer, so navigating away cannot cut the window short.
   const commitPendingDelete = () => {
     const pending = pendingDelete.current
     if (!pending) return
@@ -212,12 +238,6 @@ export default function TasksGridScreen({
     pendingDelete.current = null
     pending.ids.forEach(onDeleteTask)
   }
-  const commitRef = useRef(commitPendingDelete)
-  commitRef.current = commitPendingDelete
-  useEffect(() => () => {
-    commitRef.current()
-    window.clearTimeout(statusTimer.current)
-  }, [])
 
   // A press held as the screen goes must not fire against a task list nobody
   // sees any more.
@@ -230,6 +250,7 @@ export default function TasksGridScreen({
   const showStatus = (next: Status | null) => {
     window.clearTimeout(statusTimer.current)
     setStatus(next)
+    onStatus?.(next)
     if (next) statusTimer.current = window.setTimeout(() => setStatus(null), UNDO_WINDOW_MS)
   }
 
@@ -401,24 +422,23 @@ export default function TasksGridScreen({
     setConfirmIds(null)
     ids.forEach((id) => setAnimation(id, "crumpling"))
     await wait(470)
-    commitPendingDelete()
     setHiddenIds((current) => [...current, ...ids])
     ids.forEach(clearAnimation)
     setSelectMode(false)
     setSelected([])
 
-    const timer = window.setTimeout(commitPendingDelete, UNDO_WINDOW_MS)
-    pendingDelete.current = { ids, timer }
     const first = tasks.find((task) => task.id === ids[0])
     showStatus({
       text: ids.length === 1 ? `Deleted “${first?.title ?? "task"}”.` : `Deleted ${ids.length} tasks.`,
+      // The page owns the waiting delete now, so Undo is still on screen after
+      // this grid unmounts.
       undo: () => {
-        window.clearTimeout(timer)
-        pendingDelete.current = null
+        onUndoPendingDelete?.()
         setHiddenIds((current) => current.filter((id) => !ids.includes(id)))
         showStatus({ text: "Delete undone." })
       },
     })
+    onPendingDelete?.(ids)
   }
 
   const restoreSelected = () => {
@@ -621,7 +641,7 @@ export default function TasksGridScreen({
       <div className="xp-window-body">{collection}</div>
 
       <XpStatusBar>
-        <span className="xp-sb is-grow" role="status">
+        <span className="xp-sb is-grow">
           <span>{status?.text ?? defaultStatus}</span>
           {status?.undo && <button type="button" className="xp-link" onClick={status.undo}>Undo</button>}
         </span>
