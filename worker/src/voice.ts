@@ -146,31 +146,36 @@ export function buildVoicePrompt(request: VoiceRequest): string {
  *
  * The model names a task by its title as often as by its id ("kahve al" instead
  * of "t17"), so a name that is not an id is read as a title. The match is the
- * whole title, trimmed and lower-cased in Turkish; a title no task has, or that
- * two tasks share, names nothing and is dropped as before.
+ * whole title, trimmed and lower-cased in Turkish. A title several tasks share
+ * is not a guess the worker may make: it becomes a choice for the user, in the
+ * order the request listed the tasks.
  */
 export function normalizeRemoteIntent(raw: unknown, request: VoiceRequest): RemoteIntent {
   if (!isRecord(raw)) return { action: 'unknown' }
 
   const action = raw.action
   const known = request.tasks.map((task) => task.id)
-  /** The task a name points at, whether the model wrote the id or the title. */
-  const resolveTaskId = (value: unknown): string | undefined => {
-    if (typeof value !== 'string') return undefined
-    if (known.includes(value)) return value
+  /**
+   * The tasks a name points at, whether the model wrote an id or a title. More
+   * than one means the name is ambiguous, not that the worker may pick.
+   */
+  const resolveName = (value: unknown): string[] => {
+    if (typeof value !== 'string') return []
+    if (known.includes(value)) return [value]
 
     const wanted = value.trim().toLocaleLowerCase('tr-TR')
-    const titled = request.tasks.filter(
-      (task) => task.title.trim().toLocaleLowerCase('tr-TR') === wanted
-    )
-    // Two tasks with the title name no single one of them.
-    return titled.length === 1 ? titled[0].id : undefined
+    return request.tasks
+      .filter((task) => task.title.trim().toLocaleLowerCase('tr-TR') === wanted)
+      .map((task) => task.id)
+  }
+  /** Names may repeat a task or name several; the request decides the order. */
+  const inRequestOrder = (ids: string[]): string[] => {
+    const unique = new Set(ids)
+    return request.tasks.map((task) => task.id).filter((id) => unique.has(id))
   }
 
   const candidates = Array.isArray(raw.candidates)
-    ? raw.candidates
-        .map(resolveTaskId)
-        .filter((id): id is string => id !== undefined)
+    ? inRequestOrder(raw.candidates.flatMap(resolveName))
     : []
   const wanted = (raw.action === 'delete' || raw.action === 'complete' || raw.action === 'update'
     ? raw.action
@@ -198,7 +203,13 @@ export function normalizeRemoteIntent(raw: unknown, request: VoiceRequest): Remo
   }
 
   if (action === 'delete' || action === 'complete' || action === 'update') {
-    const taskId = resolveTaskId(raw.taskId)
+    const named = resolveName(raw.taskId)
+    // A title several tasks share: the user says which one, not the worker.
+    if (named.length >= 2) {
+      return { action: 'confirm', wanted: action, candidates: named }
+    }
+
+    const taskId = named[0]
     if (taskId !== undefined) {
       if (action === 'update') {
         const intent: { action: 'update'; taskId: string; title?: string; dueDate?: string; alarm?: string } = {

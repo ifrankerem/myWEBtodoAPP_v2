@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Task } from '@/lib/task'
 import {
+  REMOTE_MAX_TASKS,
   REMOTE_TIMEOUT_MS,
   askRemoteIntent,
   toVoiceIntent,
@@ -55,6 +56,11 @@ function ask(
     url: URL,
     fetchImpl: fetchImpl as typeof fetch,
   })
+}
+
+/** The tasks the worker was actually sent, as the plain `{ id, title }` pairs. */
+function sentTasks(calls: Array<{ init: RequestInit }>) {
+  return JSON.parse(String(calls[0].init.body)).tasks as Array<{ id: string; title: string }>
 }
 
 describe('voiceIntentUrl', () => {
@@ -133,6 +139,42 @@ describe('askRemoteIntent', () => {
       ],
       today: '2026-10-09',
     })
+  })
+
+  // Issue case 1
+  it('case 1: sends the open tasks only, so a done task cannot be named', async () => {
+    const X = { ...task('X', 'kahve al'), completed: true }
+    const { impl, calls } = fakeFetch({ action: 'unknown' })
+
+    await askRemoteIntent('şu kahve olayını listeden kaldır', [B, X, F], TODAY, token, {
+      url: URL,
+      fetchImpl: impl as typeof fetch,
+    })
+
+    expect(sentTasks(calls)).toEqual([
+      { id: 'B', title: 'kahve al' },
+      { id: 'F', title: 'Berber randevusu' },
+    ])
+  })
+
+  // Issue case 2
+  it('case 2: sends at most REMOTE_MAX_TASKS, keeping the order they came in', async () => {
+    expect(REMOTE_MAX_TASKS).toBe(150)
+
+    const many = Array.from({ length: 200 }, (_, index) =>
+      task(`T${index}`, `görev ${index}`)
+    )
+    const { impl, calls } = fakeFetch({ action: 'unknown' })
+
+    await askRemoteIntent('şu kahve olayını listeden kaldır', many, TODAY, token, {
+      url: URL,
+      fetchImpl: impl as typeof fetch,
+    })
+
+    const sent = sentTasks(calls)
+    expect(sent).toHaveLength(REMOTE_MAX_TASKS)
+    expect(sent[0]).toEqual({ id: 'T0', title: 'görev 0' })
+    expect(sent.at(-1)).toEqual({ id: 'T149', title: 'görev 149' })
   })
 
   // Issue case 3

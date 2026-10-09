@@ -22,10 +22,28 @@ import type { VoiceIntent } from '@/lib/voice-intent'
  */
 export const REMOTE_TIMEOUT_MS = 10000
 
+/**
+ * How many tasks a request may carry. The prompt is the model's whole context
+ * and a long one answers slowly, so the list is cut rather than the wait.
+ */
+export const REMOTE_MAX_TASKS = 150
+
 /** Where the Worker's voice endpoint lives, or null when it is not configured. */
 export function voiceIntentUrl(): string | null {
   const url = process.env.NEXT_PUBLIC_VOICE_INTENT_URL?.trim()
   return url === undefined || url === '' ? null : url
+}
+
+/**
+ * The tasks worth asking about: the open ones, in the order the screen shows
+ * them. A finished task cannot be deleted, completed or moved by a command, so
+ * sending it only made the prompt longer and gave the model a name to pick.
+ */
+function openTasks(tasks: Task[]): Array<{ id: string; title: string }> {
+  return tasks
+    .filter((task) => task.completed !== true)
+    .slice(0, REMOTE_MAX_TASKS)
+    .map(({ id, title }) => ({ id, title }))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,7 +178,7 @@ export async function askRemoteIntent(
       },
       body: JSON.stringify({
         text,
-        tasks: tasks.map(({ id, title }) => ({ id, title })),
+        tasks: openTasks(tasks),
         today: toDateString(today),
       }),
       signal: controller.signal,
