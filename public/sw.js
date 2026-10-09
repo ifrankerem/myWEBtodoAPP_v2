@@ -1,4 +1,4 @@
-const CACHE_NAME = 'task-manager-xp-v5';
+const CACHE_NAME = 'task-manager-xp-v6';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -8,7 +8,20 @@ const STATIC_ASSETS = [
 ];
 
 // Dynamic cache for Next.js chunks and other assets
-const DYNAMIC_CACHE = 'task-manager-dynamic-xp-v5';
+const DYNAMIC_CACHE = 'task-manager-dynamic-xp-v6';
+
+// Oldest entry first: the dynamic cache grows with every route ever visited,
+// so it is trimmed rather than kept forever.
+const DYNAMIC_CACHE_LIMIT = 80;
+
+/** Drop the oldest entries once the dynamic cache passes its limit. */
+async function trimDynamicCache() {
+  const cache = await caches.open(DYNAMIC_CACHE);
+  const keys = await cache.keys();
+  for (const key of keys.slice(0, Math.max(0, keys.length - DYNAMIC_CACHE_LIMIT))) {
+    await cache.delete(key);
+  }
+}
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -128,7 +141,7 @@ self.addEventListener('fetch', (event) => {
         if (response.ok && request.method === 'GET') {
           const responseClone = response.clone();
           caches.open(DYNAMIC_CACHE).then((cache) => {
-            cache.put(request, responseClone);
+            cache.put(request, responseClone).then(trimDynamicCache);
           });
         }
         return response;

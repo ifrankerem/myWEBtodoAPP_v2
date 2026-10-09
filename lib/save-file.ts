@@ -35,5 +35,7 @@ export async function saveTextFile(filename: string, content: string, mimeType: 
   document.body.appendChild(link)
   link.click()
   link.remove()
-  URL.revokeObjectURL(url)
+  // Safari needs the anchor alive past this tick before the URL goes away;
+  // revoking it here produced an empty file there.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }

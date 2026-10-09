@@ -225,6 +225,10 @@ export default function SettingsScreen({ tasks, onBack, onLogOff, onDataImported
             alarm: optionalString(candidate, "alarm"),
             repeats: optionalString(candidate, "repeats"),
             dueDate: optionalString(candidate, "dueDate"),
+            // A restore must not silently reopen finished tasks or flatten a
+            // repeat rule down to its legacy weekday string.
+            completed: candidate.completed === true,
+            repeatRule: candidate.repeatRule as Parameters<typeof createCloudTask>[1]["repeatRule"],
           }
 
           try {

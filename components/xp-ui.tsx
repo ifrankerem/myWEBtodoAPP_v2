@@ -300,6 +300,10 @@ export function useScheme() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
+  // Both timers below must not outlive the component that started them.
+  const flashTimers = useRef<number[]>([])
+  useEffect(() => () => flashTimers.current.forEach((id) => window.clearTimeout(id)), [])
+
   const changeScheme = (next: string) => {
     if (next === theme) return
     if (prefersReducedMotion()) {
@@ -310,8 +314,10 @@ export function useScheme() {
     const flash = document.createElement("div")
     flash.className = "xp-flash"
     document.body.appendChild(flash)
-    window.setTimeout(() => setTheme(next), 170)
-    window.setTimeout(() => flash.remove(), 520)
+    flashTimers.current.push(
+      window.setTimeout(() => setTheme(next), 170),
+      window.setTimeout(() => flash.remove(), 520),
+    )
   }
 
   return { scheme: mounted ? theme ?? "system" : "system", changeScheme }

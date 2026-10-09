@@ -19,8 +19,8 @@ interface TaskPropertiesProps {
   task?: Task
   initialDueDate?: string
   initialTab?: Tab
-  /** New task: called once with the form, plus the picked file for upload. */
-  onCreate?: (draft: TaskDraft, photoFile?: File) => void
+  /** New task: called once with the form. */
+  onCreate?: (draft: TaskDraft) => void
   /** Existing task: called by OK and Apply with the changed fields. */
   onApply?: (updates: Partial<Task>) => void
   onToggleComplete?: () => void
@@ -111,19 +111,18 @@ export default function TaskProperties({
   }
 
   const create = () => {
-    onCreate?.(
-      {
-        title: title.trim() || "Untitled Task",
-        type: photoFile ? "picture" : "text",
-        photo: photo || undefined,
-        detail: detail || undefined,
-        alarm,
-        repeats: toLegacyRepeats(repeatRule),
-        repeatRule,
-        dueDate: dueDate || undefined,
-      },
-      photoFile,
-    )
+    // The draft already carries the compressed photo (see handlePhoto), so the
+    // raw File is no longer passed on and compressed a second time.
+    onCreate?.({
+      title: title.trim() || "Untitled Task",
+      type: photoFile ? "picture" : "text",
+      photo: photo || undefined,
+      detail: detail || undefined,
+      alarm,
+      repeats: toLegacyRepeats(repeatRule),
+      repeatRule,
+      dueDate: dueDate || undefined,
+    })
   }
 
   const tabs: Array<[Tab, string]> = [["general", "General"], ["reminder", "Reminder"], ["picture", "Picture"]]

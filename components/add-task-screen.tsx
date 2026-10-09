@@ -4,7 +4,7 @@ import type { Task } from "@/lib/task"
 import TaskProperties from "@/components/task-properties"
 
 interface AddTaskScreenProps {
-  onSave: (task: Omit<Task, "id" | "createdDate" | "lastEditedDate">, photoFile?: File) => void
+  onSave: (task: Omit<Task, "id" | "createdDate" | "lastEditedDate">) => void
   onCancel: () => void
   initialDueDate?: string
 }
