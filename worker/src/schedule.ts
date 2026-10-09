@@ -7,6 +7,11 @@
 //
 // This mirrors lib/repeat-rule.ts, but every date calculation is done in the
 // alarm's own timezone rather than the runtime's (which is always UTC here).
+//
+// The duplicated rule parsing is deliberate: this package has no runtime
+// dependencies and does not import from the app. tests/repeat-rule-parity.test.ts
+// keeps the two copies honest — that check exists because they drifted once and
+// the worker re-armed an alarm the app considered one-shot, forever.
 
 export type RepeatRule =
   | { kind: 'none' }
