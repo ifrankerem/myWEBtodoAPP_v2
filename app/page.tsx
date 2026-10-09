@@ -95,6 +95,13 @@ export default function Page() {
   const openOriginRef = useRef<DOMRect | null>(null)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
+  // The screens hold on to this handler for their Undo, so it may be called long
+  // after the render it came from: `Moved "…" to Completed. Undo` runs the
+  // handler captured while the task was still open. Reading that render's list
+  // made Undo complete the task a second time instead of restoring it, so the
+  // lookup reads the list as it is now, whatever render created the function.
+  const tasksRef = useRef<Task[]>(tasks)
+  tasksRef.current = tasks
   const [loading, setLoading] = useState(true)
   const [showEasterEgg, setShowEasterEgg] = useState(false)
   const [calendarDueDate, setCalendarDueDate] = useState<string | undefined>(undefined)
@@ -432,7 +439,7 @@ export default function Page() {
 
   const handleToggleComplete = async (taskId: string) => {
     if (!user) return
-    const task = tasks.find(t => t.id === taskId)
+    const task = tasksRef.current.find(t => t.id === taskId)
     if (!task) return
     
     await toggleCloudTaskComplete(user.uid, taskId, task.completed || false)
