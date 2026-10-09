@@ -38,7 +38,8 @@ export function storedTaskToTask(stored: TaskRecord): Task {
     lastEditedDate: new Date(stored.updatedAt),
     alarm: stored.alarm || undefined,
     repeats: stored.repeats || undefined,
-    repeatRule: stored.repeatRule,
+    // Firestore holds null where a field was cleared; the screens want undefined.
+    repeatRule: stored.repeatRule ?? undefined,
     completed: stored.completed,
     dueDate: stored.dueDate || undefined,
   }

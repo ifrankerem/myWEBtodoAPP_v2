@@ -59,6 +59,21 @@ export type CloudTaskUpdates = Partial<Omit<TaskRecord, 'detail' | 'photo' | 'al
   dueDate?: string | null;
 };
 
+/**
+ * A task as a reorder writes it: cleared fields are explicit nulls, because a
+ * merge keeps every field the payload leaves out. TaskRecord models a document
+ * as it comes back from Firestore, where those fields are simply absent, so the
+ * two shapes need not be the same type.
+ */
+export type StorableTask = Omit<TaskRecord, 'detail' | 'photo' | 'alarm' | 'repeats' | 'repeatRule' | 'dueDate'> & {
+  detail?: string | null;
+  photo?: string | null;
+  alarm?: string | null;
+  repeats?: string | null;
+  repeatRule?: RepeatRule | null;
+  dueDate?: string | null;
+};
+
 // Get all tasks from Firestore (one-time fetch)
 export async function getCloudTasks(userId: string): Promise<TaskRecord[]> {
   try {
@@ -107,6 +122,8 @@ export async function createCloudTask(
     repeats?: string;
     repeatRule?: RepeatRule;
     dueDate?: string;
+    /** Carried over by a restore, which must not reopen finished tasks. */
+    completed?: boolean;
   }
 ): Promise<TaskRecord> {
   const now = new Date().toISOString();
@@ -117,7 +134,7 @@ export async function createCloudTask(
     title: data.title,
     detail: data.detail,
     photo: data.photo,
-    completed: false,
+    completed: data.completed ?? false,
     createdAt: now,
     updatedAt: now,
     alarm: data.alarm,
@@ -137,31 +154,23 @@ export async function updateCloudTask(
   taskId: string,
   updates: CloudTaskUpdates
 ): Promise<void> {
-  try {
-    const firestoreUpdates = Object.fromEntries(
-      Object.entries(updates).map(([key, value]) => [key, value === null ? deleteField() : value])
-    );
-    await updateDoc(taskDoc(userId, taskId), stripUndefined({
-      ...firestoreUpdates,
-      updatedAt: new Date().toISOString(),
-    }));
-  } catch (error) {
-    console.error('Error updating cloud task:', error);
-  }
+  // Errors are re-thrown, not swallowed: a caller that only logs them leaves the
+  // user looking at a saved edit that never left the device.
+  const firestoreUpdates = Object.fromEntries(
+    Object.entries(updates).map(([key, value]) => [key, value === null ? deleteField() : value])
+  );
+  await updateDoc(taskDoc(userId, taskId), stripUndefined({
+    ...firestoreUpdates,
+    updatedAt: new Date().toISOString(),
+  }));
 }
 
 // Delete a task from Firestore
 export async function deleteCloudTask(
   userId: string,
   taskId: string
-): Promise<boolean> {
-  try {
-    await deleteDoc(taskDoc(userId, taskId));
-    return true;
-  } catch (error) {
-    console.error('Error deleting cloud task:', error);
-    return false;
-  }
+): Promise<void> {
+  await deleteDoc(taskDoc(userId, taskId));
 }
 
 // Toggle task completion in Firestore
@@ -175,24 +184,33 @@ export async function toggleCloudTaskComplete(
   });
 }
 
-// Persist task order without deleting documents or replacing concurrent changes.
+// Persist task order without deleting concurrent changes.
+//
+// Optional fields are written as explicit nulls instead of being left out: a
+// merge keeps every field the payload omits, so leaving `alarm` out of the
+// payload would resurrect the alarm the user had just turned off.
 export async function saveCloudTasks(
   userId: string,
-  tasks: TaskRecord[]
+  tasks: StorableTask[]
 ): Promise<void> {
-  try {
-    const chunkSize = 450;
-    for (let start = 0; start < tasks.length; start += chunkSize) {
-      const batch = writeBatch(getDbInstance());
-      tasks.slice(start, start + chunkSize).forEach((task, index) => {
-        const sortOrder = start + index;
-        const ref = taskDoc(userId, task.id);
-        batch.set(ref, stripUndefined({ ...task, sortOrder }), { merge: true });
-      });
-      await batch.commit();
-    }
-  } catch (error) {
-    console.error('Error saving cloud tasks:', error);
+  const chunkSize = 450;
+  for (let start = 0; start < tasks.length; start += chunkSize) {
+    const batch = writeBatch(getDbInstance());
+    tasks.slice(start, start + chunkSize).forEach((task, index) => {
+      const sortOrder = start + index;
+      const ref = taskDoc(userId, task.id);
+      batch.set(ref, stripUndefined({
+        ...task,
+        detail: task.detail ?? null,
+        photo: task.photo ?? null,
+        alarm: task.alarm ?? null,
+        repeats: task.repeats ?? null,
+        repeatRule: task.repeatRule ?? null,
+        dueDate: task.dueDate ?? null,
+        sortOrder,
+      }), { merge: true });
+    });
+    await batch.commit();
   }
 }
 
@@ -200,7 +218,7 @@ export async function saveCloudTasks(
 export async function migrateLocalToCloud(
   userId: string,
   localTasks: TaskRecord[]
-): Promise<{ migrated: number }> {
+): Promise<{ migrated: number; error?: string }> {
   if (localTasks.length === 0) return { migrated: 0 };
 
   try {
@@ -211,17 +229,21 @@ export async function migrateLocalToCloud(
       return { migrated: 0 };
     }
 
-    // Upload all local tasks to Firestore
-    const batch = writeBatch(getDbInstance());
-    localTasks.forEach((task, sortOrder) => {
-      const ref = taskDoc(userId, task.id);
-      batch.set(ref, stripUndefined({ ...task, sortOrder }));
-    });
-    await batch.commit();
+    // One writeBatch holds 500 writes and fails whole, so upload in chunks:
+    // a single oversized batch would drop every local task at once.
+    const chunkSize = 450;
+    for (let start = 0; start < localTasks.length; start += chunkSize) {
+      const batch = writeBatch(getDbInstance());
+      localTasks.slice(start, start + chunkSize).forEach((task, sortOrder) => {
+        const ref = taskDoc(userId, task.id);
+        batch.set(ref, stripUndefined({ ...task, sortOrder }));
+      });
+      await batch.commit();
+    }
 
     return { migrated: localTasks.length };
   } catch (error) {
     console.error('Error migrating to cloud:', error);
-    return { migrated: 0 };
+    return { migrated: 0, error: error instanceof Error ? error.message : String(error) };
   }
 }

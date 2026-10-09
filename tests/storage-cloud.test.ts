@@ -101,4 +101,25 @@ describe('cloud task persistence', () => {
       { merge: true },
     )
   })
+
+  it('writes cleared fields as null so a merge cannot resurrect them', async () => {
+    // The reorder path hands the whole task list over. A field left out of the
+    // payload is one Firestore keeps, so an alarm that was turned off would
+    // come straight back on the next snapshot.
+    await saveCloudTasks('user-1', [
+      { ...tasks[0], detail: null, photo: null, alarm: null, repeats: null, dueDate: null },
+    ])
+
+    expect(firestore.batch.set).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        detail: null,
+        photo: null,
+        alarm: null,
+        repeats: null,
+        dueDate: null,
+      }),
+      { merge: true },
+    )
+  })
 })
