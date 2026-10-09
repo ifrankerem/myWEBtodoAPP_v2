@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📋 Task Manager PWA
+# 🖥️ xp-tasks
 
 **A Windows XP-inspired, offline-first task manager — as a Progressive Web App and an installable Android build.**
 
