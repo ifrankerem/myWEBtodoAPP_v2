@@ -353,6 +353,18 @@ export default function TasksGridScreen({
       return next
     })
 
+  /**
+   * The row a toggle completes leaves the list and a focused checkbox goes with
+   * it, which would drop a keyboard user back at the top of the page to tab
+   * through everything again. Focus follows the neighbour instead.
+   */
+  const focusNeighbourCheck = (button: HTMLButtonElement) => {
+    const row = button.closest(".xp-item")
+    const neighbour = row?.nextElementSibling?.querySelector<HTMLElement>(".xp-check")
+      ?? row?.previousElementSibling?.querySelector<HTMLElement>(".xp-check")
+    neighbour?.focus()
+  }
+
   const handleCheck = async (task: Task, button: HTMLButtonElement) => {
     if (selectMode) {
       toggleSelected(task.id)
@@ -366,6 +378,7 @@ export default function TasksGridScreen({
       setAnimation(task.id, "leaving")
       await wait(260)
       onToggleComplete(task.id)
+      focusNeighbourCheck(button)
       clearAnimation(task.id)
       showStatus({ text: `Restored “${task.title}” to My Tasks.`, undo: () => { onToggleComplete(task.id); showStatus(null) } })
     } else {
@@ -376,6 +389,7 @@ export default function TasksGridScreen({
       setAnimation(task.id, "leaving")
       await wait(240)
       onToggleComplete(task.id)
+      focusNeighbourCheck(button)
       clearAnimation(task.id)
       showStatus({ text: `Moved “${task.title}” to Completed.`, undo: () => { onToggleComplete(task.id); showStatus(null) } })
     }

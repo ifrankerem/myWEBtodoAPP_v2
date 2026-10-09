@@ -258,4 +258,24 @@ describe('TasksGridScreen complete several tasks', () => {
     expect(screen.getByRole('button', { name: 'Delete (1)' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Complete/ })).not.toBeInTheDocument()
   })
+
+  it('hands focus to the next checkbox when the row it was on is completed', async () => {
+    const props = multiProps()
+    render(<TasksGridScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /mark task a as completed/i }))
+
+    await waitFor(() => expect(props.onToggleComplete).toHaveBeenCalledWith('A'), { timeout: 3000 })
+    expect(screen.getByRole('checkbox', { name: /mark task b as completed/i })).toHaveFocus()
+  })
+
+  it('falls back to the previous checkbox on the last row', async () => {
+    const props = multiProps({ tasks: [A, B] })
+    render(<TasksGridScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /mark task b as completed/i }))
+
+    await waitFor(() => expect(props.onToggleComplete).toHaveBeenCalledWith('B'), { timeout: 3000 })
+    expect(screen.getByRole('checkbox', { name: /mark task a as completed/i })).toHaveFocus()
+  })
 })
