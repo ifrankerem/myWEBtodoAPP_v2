@@ -54,8 +54,8 @@
 **Prerequisites:** Node.js 18.17+, npm/pnpm, `NEXT_PUBLIC_FIREBASE_*` env vars.
 
 ```sh
-git clone https://github.com/ifrankerem/myWEBtodoAPP_v2.git
-cd myWEBtodoAPP_v2
+git clone https://github.com/ifrankerem/xp-tasks.git
+cd xp-tasks
 npm install
 npm run dev          # http://localhost:3000
 npm run build && npm start
